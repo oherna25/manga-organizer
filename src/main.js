@@ -396,7 +396,7 @@ function drawSpine(canvas, s, color, img) {
   ctx.translate(canvas.width / 2, textTop);
   ctx.rotate(Math.PI / 2);
   ctx.textBaseline = 'middle';
-  const room = canvas.height - textTop - 44;
+  const room = canvas.height - textTop - 100; // leave the foot of the spine for the volume badge
   let size = 34;
   do {
     ctx.font = `700 ${size}px -apple-system, "Helvetica Neue", Arial, sans-serif`;
@@ -479,6 +479,35 @@ function disposeMaterials(id) {
   seriesMaterials.delete(id);
 }
 
+// Volume numbers. Cover art is one image per series, so each spine carries a small numbered badge
+// to tell the volumes apart. One texture per number, shared by every series.
+const badgeGeometry = new THREE.PlaneGeometry(1, 1);
+const badgeMaterials = new Map(); // volume number -> material
+function badgeMaterial(vol) {
+  let material = badgeMaterials.get(vol);
+  if (!material) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(16,12,10,0.92)';
+    ctx.beginPath();
+    ctx.roundRect(4, 4, 88, 88, 20);
+    ctx.fill();
+    ctx.fillStyle = '#fffaf0';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const text = String(vol);
+    ctx.font = `700 ${text.length > 2 ? 40 : text.length > 1 ? 54 : 64}px -apple-system, "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillText(text, 48, 51);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+    badgeMaterials.set(vol, material);
+  }
+  return material;
+}
+
 const books = new Map(); // "seriesId:volume" -> mesh
 let layout = { slots: [], cases: 1, risers: [] };
 const LAYOUT_MODES = ['standard', 'efficient', 'dense'];
@@ -513,9 +542,20 @@ function syncScene() {
       mesh.receiveShadow = true;
       mesh.position.copy(slot.position);
       if (!firstSync) mesh.position.add(new THREE.Vector3(0, 0.3, 2.5)); // new books slide in from the front
+      mesh.add(new THREE.Mesh(badgeGeometry, badgeMaterial(slot.vol)));
       books.set(slot.key, mesh);
       bookGroup.add(mesh);
     }
+    // The badge is a child of the scaled book, so undo that scale to keep it square, as wide as
+    // the spine, sitting just above the foot of the spine.
+    const { thickness, height } = slot.look;
+    const badge = mesh.children[0];
+    const across = 0.92;
+    const along = (thickness * 0.92) / height;
+    // A flat book lies on its side, so turn its badge a quarter turn to keep the number upright.
+    badge.rotation.z = slot.flat ? -Math.PI / 2 : 0;
+    badge.scale.set(slot.flat ? along : across, slot.flat ? across : along, 1);
+    badge.position.set(0, -0.5 + (0.13 + thickness / 2) / height, 0.5 + 0.004 / BOOK_D);
     mesh.material = materialsFor(slot.series, slot.look);
     mesh.scale.set(slot.look.thickness, slot.look.height, BOOK_D);
     mesh.userData = { slot };
