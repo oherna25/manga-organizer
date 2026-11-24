@@ -1,0 +1,242 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #17130f;
+  color: #f1ebe2;
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#panel {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  bottom: 12px;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(24, 20, 16, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+#totals {
+  margin: 2px 0 0;
+  color: #b9ad9c;
+  font-variant-numeric: tabular-nums;
+}
+
+input,
+button {
+  font: inherit;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 6px 8px;
+  min-width: 0;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid #e8a04c;
+  outline-offset: 1px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+#add-form {
+  display: grid;
+  grid-template-columns: 1fr 64px auto;
+  gap: 6px;
+}
+
+#add-title {
+  grid-column: 1 / -1;
+}
+
+#add-form button {
+  background: #c9772a;
+  border-color: #c9772a;
+  font-weight: 600;
+}
+
+#add-form button:hover {
+  background: #dd8a3b;
+}
+
+#list {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+#list li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#list li:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#list li.selected {
+  background: rgba(232, 160, 76, 0.2);
+}
+
+#list .swatch {
+  display: block;
+  width: 28px;
+  height: 40px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+#list .text {
+  min-width: 0;
+}
+
+#list .title,
+#list .author {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#list .author {
+  color: #9c9183;
+  font-size: 12px;
+}
+
+#list .controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+#list .controls button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
+}
+
+#list .count {
+  width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+#list .remove {
+  color: #e58a7b;
+}
+
+#list .empty {
+  display: block;
+  color: #9c9183;
+  cursor: default;
+}
+
+footer {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+#tooltip {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+  max-width: 320px;
+  padding: 6px 9px;
+  background: rgba(10, 8, 6, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+}
+
+#tooltip small {
+  display: block;
+  color: #b9ad9c;
+}
+
+#hint {
+  position: fixed;
+  right: 14px;
+  bottom: 12px;
+  color: rgba(241, 235, 226, 0.55);
+  font-size: 12px;
+}
+
+kbd {
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  font: inherit;
+}
+
+#layout {
+  display: grid;
+  gap: 4px;
+}
+
+#layout-modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+#layout-modes small {
+  display: block;
+  color: #9c9183;
+  font-size: 11px;
+}
+
+#layout-modes button[aria-pressed='true'] {
+  background: rgba(232, 160, 76, 0.25);
+  border-color: #e8a04c;
+}
+
+#layout-note {
+  margin: 0;
+  color: #9c9183;
+  font-size: 12px;
+}

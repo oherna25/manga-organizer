@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Manga Shelf</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <aside id="panel">
+      <header>
+        <h1>Manga Shelf</h1>
+        <p id="totals"></p>
+      </header>
+
+      <form id="add-form" autocomplete="off">
+        <input id="add-title" placeholder="Title" required />
+        <input id="add-author" placeholder="Author" />
+        <input id="add-count" type="number" min="1" max="999" value="1" aria-label="Number of volumes" />
+        <button type="submit">Add</button>
+      </form>
+
+      <div id="layout">
+        <div id="layout-modes" role="group" aria-label="Shelf layout">
+          <button type="button" data-mode="standard">Single rows<small></small></button>
+          <button type="button" data-mode="efficient">Efficient<small></small></button>
+          <button type="button" data-mode="dense">Dense<small></small></button>
+        </div>
+        <p id="layout-note"></p>
+      </div>
+
+      <input id="search" type="search" placeholder="Search title or author…" />
+
+      <ul id="list"></ul>
+
+      <footer>
+        <button id="undo" disabled>Undo</button>
+        <button id="export">Export</button>
+        <button id="import">Import</button>
+        <button id="reset">Reset</button>
+        <input id="import-file" type="file" accept="application/json,.json" hidden />
+      </footer>
+    </aside>
+
+    <div id="tooltip" hidden></div>
+    <div id="hint">Drag to orbit · right-drag to pan · scroll to zoom · click a book to pull it out and see its cover · <kbd>+</kbd>/<kbd>−</kbd> add or remove a volume</div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
