@@ -12,13 +12,19 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   series, or the form at the top to add a new one. Undo reverses any change.
 - **Shows the cover.** Click a book and it slides out and turns to face you.
 - **Finds a series.** Search by title or author, then click the row and the camera flies to it.
-- **Repacks the shelves.** Three layouts show how many bookcases the collection needs:
+- **Repacks the shelves.** Three packed layouts show how many bookcases the collection needs, and
+  free float lets you place every book by hand:
 
   | Layout | How books are placed |
   | --- | --- |
   | Single rows | One row of upright books per shelf |
   | Efficient | Two rows deep, the back row raised on risers so it stays visible, flat stacks on top of it |
   | Dense | Two rows deep with flat stacks on top of both rows; holds the most, but hides the back row |
+| Free float | Wherever you drag them: any shelf, any spot along it, front to back, upright or flat |
+
+  Free float starts from the layout you were in. A book you drop rests on the shelf or on whatever
+  is under it, and books left without support fall into place. Use **Add bookcase** for more room
+  and **Reset places** to go back to single rows.
 
 ![The efficient layout: back row on risers with flat stacks on top](docs/efficient.jpg)
 
@@ -66,6 +72,10 @@ To stop the app, press `Ctrl+C` in the terminal.
 | Zoom | Scroll |
 | See a book's cover | Click the book (click again or press `Esc` to put it back) |
 | Add or remove a volume of the selected series | `+` / `−` |
+| Move a book (free float) | Drag it; drag empty space to orbit |
+| Push it back or pull it forward (free float) | Scroll while dragging |
+| Lay it flat or stand it up (free float) | `R` while dragging |
+| Cancel a move (free float) | `Esc` while dragging |
 
 ## Using your own collection
 
@@ -75,8 +85,8 @@ The collection starts from `src/collection.json`, a list of series:
 [{ "title": "one piece", "author": "Eiichiro Oda", "count": 90 }]
 ```
 
-Edits you make in the app are saved in your browser, not in that file. **Export** downloads the
-current collection as JSON, **Import** loads one, and **Reset** goes back to `src/collection.json`.
+Edits you make in the app are saved in your browser, not in that file. So are free float
+positions, which **Export** does not include. **Export** downloads the current collection as JSON, **Import** loads one, and **Reset** goes back to `src/collection.json`.
 
 To build `src/collection.json` from a spreadsheet with `title`, `author` and `number of books`
 columns (needs Python 3):

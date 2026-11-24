@@ -37,20 +37,54 @@ function load() {
   return normalize(seed);
 }
 
+// Free float positions: where each book was put by hand, as { shelf, x, y, z, flat } per
+// "seriesId:volume", measured from the left end of its shelf board. `cases` is the number of
+// bookcases to show even when some are empty. Treated as immutable so undo can keep old copies.
+const FREE_KEY = 'manga-shelf-free-v1';
+
+function loadFree() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FREE_KEY));
+    if (saved && saved.books && typeof saved.books === 'object') {
+      const books = {};
+      for (const [key, p] of Object.entries(saved.books)) {
+        if (p && [p.shelf, p.x, p.y, p.z].every(Number.isFinite) && p.shelf >= 0) {
+          books[key] = { shelf: Math.floor(p.shelf), x: p.x, y: p.y, z: p.z, flat: Boolean(p.flat) };
+        }
+      }
+      return { cases: Math.max(1, Math.floor(Number(saved.cases)) || 1), books };
+    }
+  } catch (err) {
+    console.warn('Saved book positions were unreadable, starting over', err);
+  }
+  return { cases: 1, books: {} };
+}
+
 let series = load();
+let free = loadFree();
 let selectedId = null;
-const undoStack = [];
+const undoStack = []; // { series, free } before each change
+
+function snapshot() {
+  undoStack.push({ series, free });
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+}
 
 function commit(next) {
-  undoStack.push(series);
-  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  snapshot();
   apply(normalize(next));
 }
 
-function apply(next) {
-  series = next;
-  if (!series.some((s) => s.id === selectedId)) selectedId = null;
+function save() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(series));
+  localStorage.setItem(FREE_KEY, JSON.stringify(free));
+}
+
+function apply(next, nextFree = free) {
+  series = next;
+  free = nextFree;
+  if (!series.some((s) => s.id === selectedId)) selectedId = null;
+  save();
   renderList();
   syncScene();
 }
@@ -168,11 +202,167 @@ function packEfficientShelf(queue, start, shelf, out, risers, dense) {
   return i;
 }
 
+// Free float layout: every book sits where it was dropped. A book rests on the shelf board or on
+// whatever is under it, and never passes through another book.
+const Z_MIN = -CASE_D / 2 + 0.05 + BOOK_D / 2; // spine-to-wall limit: the back panel
+const SNAP = 0.1; // how far a dropped book slides sideways to slot in next to its neighbours
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const seriesIdOf = (key) => key.slice(0, key.lastIndexOf(':'));
+// Width along the shelf and height off it. A flat book lies with its height along the shelf.
+const extent = (look, flat) =>
+  flat ? { w: look.height, h: look.thickness } : { w: look.thickness, h: look.height };
+let lookById = new Map(); // series id -> look, refreshed on every sync
+
+function bodiesIn(books, shelf, skip) {
+  const out = [];
+  for (const key in books) {
+    const p = books[key];
+    if (p.shelf !== shelf || key === skip) continue;
+    const look = lookById.get(seriesIdOf(key));
+    if (look) out.push({ key, ...p, ...extent(look, p.flat) });
+  }
+  return out;
+}
+
+const overlaps = (body, x, z, w) =>
+  Math.abs(body.x - x) < (body.w + w) / 2 - 1e-4 && Math.abs(body.z - z) < BOOK_D - 1e-4;
+
+function restOn(bodies, x, z, w) {
+  let top = 0;
+  for (const body of bodies) if (overlaps(body, x, z, w)) top = Math.max(top, body.y + body.h / 2);
+  return top;
+}
+
+// Where a book comes to rest if it is let go at x, z on a shelf holding `bodies`.
+// Returns null when it does not fit under the board above.
+function dropSpot(bodies, look, x, z, flat) {
+  const { w, h } = extent(look, flat);
+  const fit = (value) => clamp(value, w / 2, SHELF_W - w / 2);
+  x = fit(x);
+  z = clamp(z, Z_MIN, BOOK_Z);
+  let floor = restOn(bodies, x, z, w);
+  if (floor > 0) {
+    // It landed on something. If there is a lower spot right beside it, slide into that instead.
+    const raw = x;
+    for (const body of bodies) {
+      if (!overlaps(body, raw, z, w)) continue;
+      for (const beside of [body.x - (body.w + w) / 2, body.x + (body.w + w) / 2]) {
+        if (beside !== fit(beside) || Math.abs(beside - raw) > SNAP) continue;
+        const level = restOn(bodies, beside, z, w);
+        if (level < floor - 1e-6) {
+          floor = level;
+          x = beside;
+        }
+      }
+    }
+  }
+  if (floor + h > CLEAR + 1e-6) return null;
+  return { x, y: floor + h / 2, z, flat };
+}
+
+// Let every book on a shelf fall until it rests on something. Edits `books` in place.
+function settle(books, shelf) {
+  const bodies = bodiesIn(books, shelf).sort((a, b) => a.y - a.h / 2 - (b.y - b.h / 2));
+  const done = [];
+  for (const body of bodies) {
+    const y = restOn(done, body.x, body.z, body.w) + body.h / 2;
+    if (Math.abs(y - body.y) > 1e-6) books[body.key] = { shelf, x: body.x, y, z: body.z, flat: body.flat };
+    done.push({ ...body, y });
+  }
+}
+
+// Start free float from one of the packed layouts.
+function seedFree(mode) {
+  const books = {};
+  const packed = computeLayout(series, mode);
+  for (const { key, shelf, x, y, z, flat } of packed.slots) books[key] = { shelf, x, y, z, flat };
+  // Risers are not part of free float, so books that stood on one drop to the board.
+  if (packed.risers.length) for (let shelf = 0; shelf < packed.cases * SHELVES; shelf++) settle(books, shelf);
+  return { cases: 1, books };
+}
+
+// The first gap in the front row that is wide enough, on the first shelf that has one.
+function firstGap(books, width) {
+  for (let shelf = 0; ; shelf++) {
+    const row = bodiesIn(books, shelf)
+      .filter((body) => Math.abs(body.z - BOOK_Z) < BOOK_D)
+      .sort((a, b) => a.x - a.w / 2 - (b.x - b.w / 2));
+    let x = 0;
+    for (const body of row) {
+      if (body.x - body.w / 2 - x >= width - 1e-6) break;
+      x = Math.max(x, body.x + body.w / 2);
+    }
+    if (x + width <= SHELF_W + 1e-6) return { shelf, x: x + width / 2 };
+  }
+}
+
+// Bring the saved positions in line with the collection: forget books that are gone, let whatever
+// stood on them fall, and find a spot for books that have none. Returns the new free state, or
+// the current one when nothing changed.
+function reconcileFree(seedMode) {
+  const wanted = [];
+  for (const s of series) for (let vol = 1; vol <= s.count; vol++) wanted.push({ s, vol, key: `${s.id}:${vol}` });
+  const live = new Set(wanted.map((book) => book.key));
+  const keys = Object.keys(free.books);
+  const kept = keys.filter((key) => live.has(key));
+  if (!kept.length) return wanted.length || keys.length ? seedFree(seedMode) : free;
+  const missing = wanted.filter((book) => !free.books[book.key]);
+  if (kept.length === keys.length && !missing.length) return free;
+
+  const books = {};
+  for (const key of kept) books[key] = free.books[key];
+  const emptied = new Set(keys.filter((key) => !live.has(key)).map((key) => free.books[key].shelf));
+  for (const shelf of emptied) settle(books, shelf);
+  for (const { s, vol, key } of missing) {
+    const look = lookById.get(s.id);
+    const { w, h } = extent(look, false);
+    // Next to the previous volume when there is room on the board there, else the first gap.
+    const prev = books[`${s.id}:${vol - 1}`];
+    let place = null;
+    if (prev && !prev.flat) {
+      const x = prev.x + look.thickness / 2 + w / 2;
+      const spot = x + w / 2 <= SHELF_W && dropSpot(bodiesIn(books, prev.shelf), look, x, prev.z, false);
+      if (spot && Math.abs(spot.x - x) < 1e-6 && Math.abs(spot.y - h / 2) < 1e-6) place = { shelf: prev.shelf, ...spot };
+    }
+    if (!place) {
+      const gap = firstGap(books, w);
+      place = { shelf: gap.shelf, x: gap.x, y: h / 2, z: BOOK_Z, flat: false };
+    }
+    books[key] = place;
+  }
+  return { cases: free.cases, books };
+}
+
 function computeLayout(list, mode = 'standard') {
   let slots = [];
   const risers = []; // shelf indexes that carry a riser
   let shelf = 0;
-  if (mode !== 'standard') {
+  let minCases = 1;
+  if (mode === 'free') {
+    minCases = free.cases;
+    const byShelf = new Map();
+    for (const s of list) {
+      const look = lookOf(s);
+      for (let vol = 1; vol <= s.count; vol++) {
+        const key = `${s.id}:${vol}`;
+        const p = free.books[key];
+        if (!p) continue;
+        const slot = { key, series: s, vol, look, ...p, ...extent(look, p.flat), pullable: true };
+        slots.push(slot);
+        shelf = Math.max(shelf, p.shelf);
+        if (!byShelf.has(p.shelf)) byShelf.set(p.shelf, []);
+        byShelf.get(p.shelf).push(slot);
+      }
+    }
+    // A book with another one in front of it cannot be pulled forward on hover.
+    for (const group of byShelf.values()) {
+      for (const a of group) {
+        a.pullable = !group.some(
+          (b) => b.z > a.z + 0.2 && Math.abs(b.x - a.x) < (a.w + b.w) / 2 && Math.abs(b.y - a.y) < (a.h + b.h) / 2,
+        );
+      }
+    }
+  } else if (mode !== 'standard') {
     const queue = [];
     for (const s of list) {
       const look = lookOf(s);
@@ -199,7 +389,7 @@ function computeLayout(list, mode = 'standard') {
       x += SERIES_GAP;
     }
   }
-  const cases = Math.max(1, Math.ceil((shelf + 1) / SHELVES));
+  const cases = Math.max(minCases, Math.ceil((shelf + 1) / SHELVES));
   const origin = (index) => ({ x: caseX(Math.floor(index / SHELVES), cases), y: shelfY(index % SHELVES) });
   for (const slot of slots) {
     const o = origin(slot.shelf);
@@ -510,7 +700,8 @@ function badgeMaterial(vol) {
 
 const books = new Map(); // "seriesId:volume" -> mesh
 let layout = { slots: [], cases: 1, risers: [] };
-const LAYOUT_MODES = ['standard', 'efficient', 'dense'];
+const LAYOUT_MODES = ['standard', 'efficient', 'dense', 'free'];
+let seedFrom = 'standard'; // the packed layout free float starts from
 let layoutMode = LAYOUT_MODES.includes(localStorage.getItem(LAYOUT_KEY)) ? localStorage.getItem(LAYOUT_KEY) : 'standard';
 const riserGroup = new THREE.Group();
 scene.add(riserGroup);
@@ -520,7 +711,28 @@ const riserMaterial = new THREE.MeshStandardMaterial({
 let firstSync = true;
 let inspectedKey = null; // the book pulled out and turned to show its cover
 
+// The badge is a child of the scaled book, so undo that scale to keep it square, as wide as the
+// spine, sitting just above the foot of the spine.
+function layBadge(mesh, look, flat) {
+  const { thickness, height } = look;
+  const badge = mesh.children[0];
+  const across = 0.92;
+  const along = (thickness * 0.92) / height;
+  // A flat book lies on its side, so turn its badge a quarter turn to keep the number upright.
+  badge.rotation.z = flat ? -Math.PI / 2 : 0;
+  badge.scale.set(flat ? along : across, flat ? across : along, 1);
+  badge.position.set(0, -0.5 + (0.13 + thickness / 2) / height, 0.5 + 0.004 / BOOK_D);
+}
+
 function syncScene() {
+  lookById = new Map(series.map((s) => [s.id, lookOf(s)]));
+  if (layoutMode === 'free') {
+    const next = reconcileFree(seedFrom);
+    if (next !== free) {
+      free = next;
+      save();
+    }
+  }
   layout = computeLayout(series, layoutMode);
   buildCases(layout.cases);
   riserGroup.clear();
@@ -546,16 +758,7 @@ function syncScene() {
       books.set(slot.key, mesh);
       bookGroup.add(mesh);
     }
-    // The badge is a child of the scaled book, so undo that scale to keep it square, as wide as
-    // the spine, sitting just above the foot of the spine.
-    const { thickness, height } = slot.look;
-    const badge = mesh.children[0];
-    const across = 0.92;
-    const along = (thickness * 0.92) / height;
-    // A flat book lies on its side, so turn its badge a quarter turn to keep the number upright.
-    badge.rotation.z = slot.flat ? -Math.PI / 2 : 0;
-    badge.scale.set(slot.flat ? along : across, slot.flat ? across : along, 1);
-    badge.position.set(0, -0.5 + (0.13 + thickness / 2) / height, 0.5 + 0.004 / BOOK_D);
+    layBadge(mesh, slot.look, slot.flat);
     mesh.material = materialsFor(slot.series, slot.look);
     mesh.scale.set(slot.look.thickness, slot.look.height, BOOK_D);
     mesh.userData = { slot };
@@ -665,7 +868,102 @@ function showTooltip(event) {
   canvas.style.cursor = 'pointer';
 }
 
+// Free float: drag a book to move it. The pointer moves it along the shelf and between shelves,
+// the wheel moves it front to back, and R lays it flat or stands it up.
+let drag = null; // { mesh, slot, offsetX, z, flat, event, moved, spot }
+const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+function planeHit(event, z) {
+  pointer.set((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  dragPlane.constant = -z;
+  return raycaster.ray.intersectPlane(dragPlane, new THREE.Vector3());
+}
+
+// Runs before OrbitControls sees the press, so grabbing a book does not also orbit the camera.
+window.addEventListener(
+  'pointerdown',
+  (event) => {
+    if (layoutMode !== 'free' || event.button !== 0 || event.target !== canvas || drag) return;
+    const mesh = pick(event);
+    if (!mesh) return;
+    const { slot } = mesh.userData;
+    const hit = planeHit(event, slot.z + BOOK_D / 2);
+    drag = {
+      mesh, slot, event,
+      offsetX: hit ? hit.x - slot.position.x : 0,
+      z: slot.z, flat: slot.flat, moved: false, spot: null,
+    };
+    controls.enabled = false;
+    canvas.setPointerCapture(event.pointerId);
+  },
+  true,
+);
+
+function startMoving() {
+  drag.moved = true;
+  inspectedKey = null;
+  hovered = null;
+  tooltip.hidden = true;
+  canvas.style.cursor = 'grabbing';
+}
+
+// Work out where the dragged book would rest under the pointer. False when it does not fit there.
+function updateDrag() {
+  const hit = planeHit(drag.event, drag.z + BOOK_D / 2);
+  if (!hit) return false;
+  const { cases } = layout;
+  const column = clamp(Math.round((hit.x - caseX(0, cases)) / CASE_W), 0, cases - 1);
+  const row = SHELVES - 1 - clamp(Math.floor((hit.y - BASE) / PITCH), 0, SHELVES - 1);
+  const shelf = column * SHELVES + row;
+  const left = caseX(column, cases) - SHELF_W / 2;
+  const spot = dropSpot(
+    bodiesIn(free.books, shelf, drag.slot.key), drag.slot.look, hit.x - drag.offsetX - left, drag.z, drag.flat,
+  );
+  if (!spot) return false;
+  drag.spot = { ...spot, shelf, position: new THREE.Vector3(left + spot.x, shelfY(row) + spot.y, spot.z) };
+  return true;
+}
+
+function endDrag() {
+  layBadge(drag.mesh, drag.slot.look, drag.slot.flat); // a move that goes through re-lays it
+  drag = null;
+  controls.enabled = true;
+  canvas.style.cursor = '';
+}
+
+function moveBook(slot, spot) {
+  const same = spot.shelf === slot.shelf && spot.flat === slot.flat &&
+    Math.hypot(spot.x - slot.x, spot.y - slot.y, spot.z - slot.z) < 1e-4;
+  if (same) return;
+  snapshot();
+  const books = { ...free.books, [slot.key]: { shelf: spot.shelf, x: spot.x, y: spot.y, z: spot.z, flat: spot.flat } };
+  settle(books, slot.shelf); // whatever stood on it falls
+  if (spot.shelf !== slot.shelf) settle(books, spot.shelf);
+  apply(series, { ...free, books });
+}
+
+canvas.addEventListener(
+  'wheel',
+  (event) => {
+    if (!drag) return;
+    event.preventDefault();
+    if (!drag.moved) startMoving();
+    const z = drag.z;
+    drag.z = clamp(z + event.deltaY * 0.002, Z_MIN, BOOK_Z); // scroll up pushes the book back
+    if (!updateDrag()) drag.z = z;
+  },
+  { passive: false },
+);
+canvas.addEventListener('pointercancel', () => drag && endDrag());
+
 canvas.addEventListener('pointermove', (event) => {
+  if (drag) {
+    drag.event = event;
+    if (!drag.moved && downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) startMoving();
+    if (drag.moved) updateDrag();
+    return;
+  }
   hovered = event.buttons ? null : pick(event);
   showTooltip(event);
 });
@@ -675,6 +973,14 @@ canvas.addEventListener('pointerleave', () => {
 });
 canvas.addEventListener('pointerdown', (event) => (downAt = [event.clientX, event.clientY]));
 canvas.addEventListener('pointerup', (event) => {
+  if (drag) {
+    const { moved, slot, spot } = drag;
+    endDrag();
+    if (moved) {
+      if (spot) moveBook(slot, spot);
+      return;
+    }
+  }
   if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) return; // it was a drag
   const mesh = pick(event);
   if (!mesh) {
@@ -779,21 +1085,41 @@ const LAYOUT_NOTES = {
   standard: 'One row of upright books per shelf.',
   efficient: 'Two rows deep, the back row raised on risers so it shows, flat stacks on top of it.',
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
+  free: 'Drag a book to any spot on any shelf. While dragging, scroll to push it back or pull it forward, and press R to lay it flat or stand it up.',
 };
+const freeTools = document.getElementById('free-tools');
+const removeCaseEl = document.getElementById('remove-case');
 
 function renderLayoutNote() {
   for (const button of layoutButtons) {
     const mode = button.dataset.mode;
+    button.setAttribute('aria-pressed', String(mode === layoutMode));
+    if (mode === 'free' && layoutMode !== 'free') {
+      button.querySelector('small').textContent = 'placed by hand';
+      continue;
+    }
     const cases = mode === layoutMode ? layout.cases : computeLayout(series, mode).cases;
     button.querySelector('small').textContent = `${cases} bookcase${cases === 1 ? '' : 's'}`;
-    button.setAttribute('aria-pressed', String(mode === layoutMode));
   }
   layoutNoteEl.textContent = LAYOUT_NOTES[layoutMode];
+  freeTools.hidden = layoutMode !== 'free';
+  removeCaseEl.disabled = layout.cases < 2 || layout.slots.some((slot) => slot.shelf >= (layout.cases - 1) * SHELVES);
 }
+
+freeTools.addEventListener('click', (event) => {
+  const act = event.target.closest('button')?.id;
+  if (!act || layoutMode !== 'free') return;
+  snapshot();
+  if (act === 'add-case') apply(series, { ...free, cases: layout.cases + 1 });
+  else if (act === 'remove-case') apply(series, { ...free, cases: layout.cases - 1 });
+  else apply(series, seedFree('standard')); // reset-places
+  overview(false);
+});
 
 document.getElementById('layout-modes').addEventListener('click', (event) => {
   const mode = event.target.closest('button')?.dataset.mode;
   if (!mode || mode === layoutMode) return;
+  if (layoutMode !== 'free') seedFrom = layoutMode;
   layoutMode = mode;
   localStorage.setItem(LAYOUT_KEY, layoutMode);
   inspectedKey = null;
@@ -827,7 +1153,9 @@ document.getElementById('add-form').addEventListener('submit', (event) => {
 });
 
 undoEl.addEventListener('click', () => {
-  if (undoStack.length) apply(undoStack.pop());
+  if (!undoStack.length) return;
+  const previous = undoStack.pop();
+  apply(previous.series, previous.free);
 });
 
 document.getElementById('reset').addEventListener('click', () => {
@@ -863,6 +1191,16 @@ importFile.addEventListener('change', async () => {
 window.addEventListener('keydown', (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return; // leave browser shortcuts alone
   if (event.target.closest('input, textarea')) return;
+  if (drag) {
+    if (event.key === 'Escape') endDrag(); // put the book back where it was
+    if (event.key === 'r' || event.key === 'R') {
+      if (!drag.moved) startMoving();
+      drag.flat = !drag.flat;
+      if (updateDrag()) layBadge(drag.mesh, drag.slot.look, drag.flat);
+      else drag.flat = !drag.flat; // no room to turn it here
+    }
+    return;
+  }
   if (event.key === 'Escape') {
     inspectedKey = null;
     select(null);
@@ -885,18 +1223,21 @@ function tick() {
 
   for (const mesh of bookGroup.children) {
     const { slot } = mesh.userData;
-    goal.copy(slot.position);
+    const held = drag && drag.mesh === mesh && drag.moved && drag.spot ? drag.spot : null;
+    goal.copy(held ? held.position : slot.position);
     const inspected = slot.key === inspectedKey;
-    if (inspected) goal.z = INSPECT_Z;
+    const flat = held ? held.flat : slot.flat;
+    if (held) goal.z += 0.1; // lifted a little towards you while it is in your hand
+    else if (inspected) goal.z = INSPECT_Z;
     else if (!slot.pullable) {
       // Back-row books stay put: the front row is in the way.
     } else if (mesh === hovered) goal.z += 0.45;
     else if (slot.series.id === selectedId) goal.z += 0.2;
-    mesh.position.lerp(goal, ease);
+    mesh.position.lerp(goal, held ? 1 - Math.exp(-dt * 30) : ease);
     // Turn the pulled-out book so its front cover (+x face) faces the room.
     mesh.rotation.y += ((inspected ? -Math.PI / 2 : 0) - mesh.rotation.y) * ease;
     // Stacked books lie flat with the spine out and the title reading left to right.
-    mesh.rotation.z += ((slot.flat && !inspected ? Math.PI / 2 : 0) - mesh.rotation.z) * ease;
+    mesh.rotation.z += ((flat && !inspected ? Math.PI / 2 : 0) - mesh.rotation.z) * ease;
   }
 
   if (cameraGoal) {
@@ -923,5 +1264,15 @@ window.__shelf = {
   get layout() { return layout; },
   books,
   layoutFor: (mode) => computeLayout(series, mode),
-  limits: { SHELF_W, CLEAR, BOOK_D, CASE_D },
+  get free() { return free; },
+  // Where book `key` would rest if dropped at x, z on a shelf (null when it does not fit).
+  dropSpot: (key, shelf, x, z, flat = false) =>
+    dropSpot(bodiesIn(free.books, shelf, key), lookById.get(seriesIdOf(key)), x, z, flat),
+  moveBook: (key, shelf, x, z, flat = false) => {
+    const slot = layout.slots.find((item) => item.key === key);
+    const spot = slot && window.__shelf.dropSpot(key, shelf, x, z, flat);
+    if (spot) moveBook(slot, { ...spot, shelf });
+    return spot;
+  },
+  limits: { SHELF_W, CLEAR, BOOK_D, CASE_D, BOOK_Z, Z_MIN },
 };

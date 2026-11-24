@@ -27,8 +27,14 @@
           <button type="button" data-mode="standard">Single rows<small></small></button>
           <button type="button" data-mode="efficient">Efficient<small></small></button>
           <button type="button" data-mode="dense">Dense<small></small></button>
+          <button type="button" data-mode="free">Free float<small></small></button>
         </div>
         <p id="layout-note"></p>
+        <div id="free-tools" hidden>
+          <button type="button" id="add-case">Add bookcase</button>
+          <button type="button" id="remove-case" title="Removes the last bookcase when it is empty">Remove empty</button>
+          <button type="button" id="reset-places" title="Put every book back in single rows">Reset places</button>
+        </div>
       </div>
 
       <input id="search" type="search" placeholder="Search title or author…" />

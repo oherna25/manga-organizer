@@ -220,7 +220,7 @@ kbd {
 
 #layout-modes {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 6px;
 }
 
@@ -239,4 +239,15 @@ kbd {
   margin: 0;
   color: #9c9183;
   font-size: 12px;
+}
+
+#free-tools {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  font-size: 12px;
+}
+
+#free-tools[hidden] {
+  display: none;
 }
