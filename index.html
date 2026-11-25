@@ -32,10 +32,44 @@
         <p id="layout-note"></p>
         <div id="free-tools" hidden>
           <button type="button" id="add-case">Add bookcase</button>
-          <button type="button" id="remove-case" title="Removes the last bookcase when it is empty">Remove empty</button>
+          <button type="button" id="remove-case" title="Removes every bookcase that holds no books or figures">Remove empty</button>
           <button type="button" id="reset-places" title="Put every book back in single rows">Reset places</button>
         </div>
+        <label id="together" hidden>
+          Keep a series together
+          <select id="together-mode">
+            <option value="off">Off</option>
+            <option value="shelf">On the same shelf</option>
+            <option value="bookcase">In the same bookcase</option>
+          </select>
+        </label>
       </div>
+
+      <details id="figures">
+        <summary>Figures <span id="figure-count"></span></summary>
+        <form id="figure-form" autocomplete="off">
+          <input id="figure-name" placeholder="Figure name" maxlength="80" />
+          <select id="figure-size" aria-label="Figure size"></select>
+          <button type="submit">Add</button>
+        </form>
+        <p id="figure-note"></p>
+        <ul id="figure-list"></ul>
+      </details>
+
+      <details id="case-size">
+        <summary>Bookcase size <span id="case-summary"></span></summary>
+        <form id="case-form" autocomplete="off">
+          <label>Height<input id="case-height" type="number" step="0.01" /></label>
+          <label>Width<input id="case-width" type="number" step="0.01" /></label>
+          <label>Depth<input id="case-depth" type="number" step="0.01" /></label>
+          <label>Shelves<input id="case-shelves" type="number" step="1" /></label>
+          <p id="case-note"></p>
+          <div id="case-buttons">
+            <button type="button" id="case-even" title="Space the shelf boards evenly again">Even shelves</button>
+            <button type="button" id="case-reset" title="Back to the Room Essentials 5 Shelf Bookcase">Default size</button>
+          </div>
+        </form>
+      </details>
 
       <input id="search" type="search" placeholder="Search title or author…" />
 
@@ -51,7 +85,7 @@
     </aside>
 
     <div id="tooltip" hidden></div>
-    <div id="hint">Drag to orbit · right-drag to pan · scroll to zoom · click a book to pull it out and see its cover · <kbd>+</kbd>/<kbd>−</kbd> add or remove a volume</div>
+    <div id="hint">Drag to orbit · right-drag to pan · scroll to zoom · drag a shelf board to move it · click a book to see its cover · <kbd>+</kbd>/<kbd>−</kbd> add or remove a volume</div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

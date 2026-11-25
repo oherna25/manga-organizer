@@ -12,6 +12,27 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   series, or the form at the top to add a new one. Undo reverses any change.
 - **Shows the cover.** Click a book and it slides out and turns to face you.
 - **Finds a series.** Search by title or author, then click the row and the camera flies to it.
+- **Displays figures.** Open **Figures** to add one by name and size, then drag it to any shelf.
+  Figures stand in front of the books: a book can sit behind a figure, never in front of one.
+
+  | Size | Height |
+  | --- | --- |
+  | Chibi (Nendoroid) | 10 cm |
+  | 1/12 (figma) | 14.5 cm |
+  | Prize / Pop Up Parade | 18 cm |
+  | 1/8 scale | 21 cm |
+  | 1/7 scale | 24 cm |
+  | 1/6 scale | 28 cm |
+  | 1/4 scale | 42 cm |
+
+  In the packed layouts a figure stands at the front edge and the books behind it move to the
+  back of the shelf, or flow around it when there is no room behind. In free float, scroll while
+  dragging a figure to move it front to back; books in its way are pushed back or moved to
+  another gap. A figure needs a shelf tall enough for it, so a 1/4 scale figure needs a shelf
+  board moved first.
+- **Resizes the bookcase.** Open **Bookcase size** to set the height, width, depth (in inches) and
+  the number of shelves, and drag any shelf board up or down in the scene. Every layout repacks
+  to fit, and Undo reverses it.
 - **Repacks the shelves.** Three packed layouts show how many bookcases the collection needs, and
   free float lets you place every book by hand:
 
@@ -20,11 +41,28 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   | Single rows | One row of upright books per shelf |
   | Efficient | Two rows deep, the back row raised on risers so it stays visible, flat stacks on top of it |
   | Dense | Two rows deep with flat stacks on top of both rows; holds the most, but hides the back row |
-| Free float | Wherever you drag them: any shelf, any spot along it, front to back, upright or flat |
+| Free float | Wherever you drag them: any shelf, any spot along it, front to back, turned any way up |
 
   Free float starts from the layout you were in. A book you drop rests on the shelf or on whatever
-  is under it, and books left without support fall into place. Use **Add bookcase** for more room
-  and **Reset places** to go back to single rows.
+  is under it, and books left without support fall into place. Use **Add bookcase** for more room,
+  **Remove empty** to take out every bookcase with nothing in it, and **Reset places** to go back
+  to single rows. Books can be turned in quarter turns to any of
+  the 24 ways a book can sit square on a shelf, for example cover out or lying on its back. When
+  the bookcase changes size, books that still fit stay where you put them and the rest are moved
+  to the first free gap.
+
+  To move a whole series at once, right-click one of its books and then drag any of them: the
+  volumes line up in order from where you drop. **Keep a series together** does this on its own
+  whenever you drop a book on another shelf, or in another bookcase, than the rest of its series.
+  Volumes that do not fit on the shelf carry on into the next gaps. Double-click a fallen or
+  turned book to stand it back up; if it cannot stand where it is, it goes against the nearest
+  side panel or neighbour that will hold it.
+
+  Free float has simple physics. An upright book falls over unless something holds it up: a side
+  panel, a neighbour that reaches at least 30% of its height, or enough books standing together
+  (about four). A book facing out needs the back panel or something behind or in front of it. A
+  book with something in the way of its fall ends up leaning on that instead. Dropping a book
+  within about an inch of a wall or neighbour sets it down against it.
 
 ![The efficient layout: back row on risers with flat stacks on top](docs/efficient.jpg)
 
@@ -72,9 +110,13 @@ To stop the app, press `Ctrl+C` in the terminal.
 | Zoom | Scroll |
 | See a book's cover | Click the book (click again or press `Esc` to put it back) |
 | Add or remove a volume of the selected series | `+` / `−` |
+| Move a shelf | Drag the shelf board up or down (`Esc` cancels) |
+| Move a figure | Drag it; in free float, scroll while dragging to move it front to back |
 | Move a book (free float) | Drag it; drag empty space to orbit |
 | Push it back or pull it forward (free float) | Scroll while dragging |
-| Lay it flat or stand it up (free float) | `R` while dragging |
+| Turn a book (free float) | `R` rolls it, `T` turns it to face another way, `F` tips it over; works on the book you are dragging or pointing at |
+| Stand a book back up (free float) | Double-click it |
+| Pick a whole series to move together (free float) | Right-click one of its books (again, or `Esc`, lets go) |
 | Cancel a move (free float) | `Esc` while dragging |
 
 ## Using your own collection
@@ -86,7 +128,7 @@ The collection starts from `src/collection.json`, a list of series:
 ```
 
 Edits you make in the app are saved in your browser, not in that file. So are free float
-positions, which **Export** does not include. **Export** downloads the current collection as JSON, **Import** loads one, and **Reset** goes back to `src/collection.json`.
+positions, figures and the bookcase size, which **Export** does not include. **Export** downloads the current collection as JSON, **Import** loads one, and **Reset** goes back to `src/collection.json`.
 
 To build `src/collection.json` from a spreadsheet with `title`, `author` and `number of books`
 columns (needs Python 3):
@@ -114,5 +156,10 @@ That writes `src/covers.json`. If a series gets the wrong cover, or none, edit
   a cover.
 - AniList has one cover per series, so every volume of a series shows the same cover.
 - Spines are generated from the cover's colour and art. They are not scans of the printed spines.
-- The bookcase is modelled on the Room Essentials 5 Shelf Bookcase (71.18 × 24.49 × 11.57 in).
+- The bookcase starts as the Room Essentials 5 Shelf Bookcase (71.18 × 24.49 × 11.57 in) with
+  evenly spaced shelves. Every bookcase shares the same shelf positions. A moved board always
+  leaves at least one shelf tall enough for any book, and the packed layouts skip shelves that
+  are too short for the next book. Changing the height or shelf count spaces the boards evenly
+  again, as does **Even shelves**.
 - Book thickness and height are generated per series, not measured, so bookcase counts are estimates.
+- Figures are drawn as simple stand-ins at typical sizes for each kind, not as models of real figures.
