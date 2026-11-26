@@ -38,9 +38,10 @@ function load() {
 }
 
 // Free float positions: where each book was put by hand, as { shelf, x, y, z, o } per
-// "seriesId:volume", measured from the left end of its shelf board. `cases` is the number of
-// `o` is one of the 24 orientations in ORIENT. `cases` is the number of bookcases to show even
-// when some are empty. Treated as immutable so undo can keep old copies.
+// "seriesId:volume", measured from the left end of its surface (see surface()). A negative
+// shelf is the top of a bookcase. `o` is one of the 24 orientations in ORIENT. `cases` is the
+// number of bookcases to show even when some are empty. Treated as immutable so undo can keep
+// old copies.
 const FREE_KEY = 'manga-shelf-free-v1';
 
 function loadFree() {
@@ -49,7 +50,7 @@ function loadFree() {
     if (saved && saved.books && typeof saved.books === 'object') {
       const books = {};
       for (const [key, p] of Object.entries(saved.books)) {
-        if (p && [p.shelf, p.x, p.y, p.z].every(Number.isFinite) && p.shelf >= 0) {
+        if (p && [p.shelf, p.x, p.y, p.z].every(Number.isFinite)) {
           // Older saves only knew upright and flat. Orientation 3 is flat (see ORIENT).
           const o = Number.isInteger(p.o) && p.o >= 0 && p.o < 24 ? p.o : p.flat ? 3 : 0;
           books[key] = { shelf: Math.floor(p.shelf), x: p.x, y: p.y, z: p.z, o };
@@ -215,17 +216,23 @@ function deriveCase() {
 deriveCase();
 
 // A shelf index names a surface that books stand on. Interior shelves count rows through every
-// bookcase: case * SHELVES + row. A surface is { case, row, top, floorY, clear, width, walls }:
-// the bookcase it belongs to, how high a book may stand there, how far x runs from the surface's
-// left edge, and whether side panels stand at its ends.
+// bookcase: case * SHELVES + row. The top of bookcase c is -(c + 1). A surface is
+// { case, row, top, floorY, clear, width, walls }: the bookcase it belongs to, how high a book may
+// stand there, how far x runs from the surface's left edge, and whether side panels stand at its
+// ends. The top spans the whole case and has no panels, and the room wall acts as its back.
+const TOP_CLEAR = 6; // 60 cm of air above a bookcase
 function surface(shelf) {
+  if (shelf < 0) {
+    return { case: -shelf - 1, row: -1, top: true, floorY: CASE_H, clear: TOP_CLEAR, width: CASE_W, walls: false };
+  }
   const row = shelf % SHELVES;
   return { case: Math.floor(shelf / SHELVES), row, top: false, floorY: ROW_FLOOR[row], clear: ROW_CLEAR[row], width: SHELF_W, walls: true };
 }
-const shelfOf = (bookcase, row) => bookcase * SHELVES + row;
+const shelfOf = (bookcase, row) => (row < 0 ? -(bookcase + 1) : bookcase * SHELVES + row); // row -1 is the top
 // Where a shelf index goes when the bookcase changes from `oldShelves` rows to the current count,
-// or null when that row is gone.
+// or null when that row is gone. A top keeps its index.
 function remapShelf(shelf, oldShelves) {
+  if (shelf < 0) return shelf;
   const row = shelf % oldShelves;
   return row < SHELVES ? shelfOf(Math.floor(shelf / oldShelves), row) : null;
 }
@@ -273,7 +280,7 @@ function figureFits(list, id, sizeKey, shelf, x, z) {
   const { w, h } = FIGURE_SIZES[sizeKey];
   const [back, front] = zRange(w);
   const surf = surface(shelf);
-  if (w > surf.width || back > front + 1e-9 || h > surf.clear) return null;
+  if (surf.top || w > surf.width || back > front + 1e-9 || h > surf.clear) return null; // figures stay inside a case
   x = clamp(x, w / 2, surf.width - w / 2);
   z = clamp(z, back, Math.max(back, front));
   for (const other of list) {
@@ -519,8 +526,10 @@ function dropSpot(shelf, bodies, look, x, z, o, magnet = false) {
       if (beside !== fit(beside) || reach > MAGNET || (best && reach >= best.reach)) return;
       if (restOn(bodies, beside, z, w, d) <= floor + 1e-6) best = { beside, reach };
     };
-    offer(w / 2);
-    offer(surf.width - w / 2);
+    if (surf.walls) {
+      offer(w / 2);
+      offer(surf.width - w / 2);
+    }
     for (const body of bodies) {
       const level = Math.abs(body.z - z) < (body.d + d) / 2 - 1e-4 &&
         body.y + body.h / 2 > floor + 1e-6 && body.y - body.h / 2 < floor + h;
@@ -760,7 +769,7 @@ function reconcileFree(seedMode) {
     // Next to the previous volume when there is room on the board there, else the first gap.
     const prev = books[`${s.id}:${vol - 1}`];
     let place = null;
-    if (prev && prev.o === 0) {
+    if (prev && prev.o === 0 && !surface(prev.shelf).top) { // new volumes never go on a bookcase top
       const x = prev.x + look.thickness / 2 + w / 2;
       const spot = x + w / 2 <= surface(prev.shelf).width && dropSpot(prev.shelf, bodiesIn(books, prev.shelf), look, x, prev.z, 0);
       if (spot && Math.abs(spot.x - x) < 1e-6 && Math.abs(spot.y - h / 2) < 1e-6) place = { shelf: prev.shelf, ...spot };
@@ -861,7 +870,9 @@ function layoutFor(list, mode) {
         if (!p) continue;
         const slot = { key, series: s, vol, look, ...p, ...extent(look, p.o), pullable: true };
         slots.push(slot);
-        shelf = Math.max(shelf, p.shelf);
+        const surf = surface(p.shelf);
+        if (surf.top) minCases = Math.max(minCases, surf.case + 1);
+        else shelf = Math.max(shelf, p.shelf);
         if (!byShelf.has(p.shelf)) byShelf.set(p.shelf, []);
         byShelf.get(p.shelf).push(slot);
       }
@@ -1427,7 +1438,9 @@ function flyTo(center, width, height, minDistance = 10) {
 }
 
 function overview(instant) {
-  flyTo(new THREE.Vector3(0, CASE_H / 2, 0), layout.cases * CASE_W, CASE_H);
+  const crowned = layout.slots.some((slot) => slot.shelf < 0); // books standing on top of a case
+  const height = CASE_H + (crowned ? 2.2 : 0);
+  flyTo(new THREE.Vector3(0, height / 2, 0), layout.cases * CASE_W, height);
   if (instant) {
     camera.position.copy(cameraGoal.position);
     controls.target.copy(cameraGoal.target);
@@ -1532,7 +1545,7 @@ function shelfAt(hit) {
   const column = clamp(Math.round((hit.x - caseX(0, cases)) / CASE_W), 0, cases - 1);
   let level = 0; // the highest board the pointer is above
   for (let k = 1; k < SHELVES; k++) if (hit.y >= BOARD_Y[k]) level = k;
-  const shelf = shelfOf(column, SHELVES - 1 - level);
+  const shelf = shelfOf(column, hit.y >= CASE_H ? -1 : SHELVES - 1 - level); // above the case is its top
   const surf = surface(shelf);
   return { shelf, floorY: surf.floorY, left: caseX(column, cases) - surf.width / 2 };
 }
@@ -1715,7 +1728,7 @@ function moveSeries(slot, spot) {
       if (next && Math.abs(next.x - x) < 1e-6 && Math.abs(next.z - z) < 1e-6) place = { shelf, ...next };
     }
     if (!place) {
-      const gap = firstGap(books, w, h, shelf);
+      const gap = firstGap(books, w, h, surface(shelf).top ? 0 : shelf); // firstGap only walks interior shelves
       place = { shelf: gap.shelf, x: gap.x, y: h / 2, z: BOOK_Z, o: 0 };
     }
     books[key] = place;
@@ -1990,7 +2003,7 @@ const LAYOUT_NOTES = {
   standard: 'One row of upright books per shelf.',
   efficient: 'Two rows deep, the back row raised on risers so it shows, flat stacks on top of it.',
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
-  free: 'Drag a book to any spot on any shelf, and scroll while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
+  free: 'Drag a book to any spot on any shelf or onto the top of a bookcase, and scroll while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
 };
 const freeTools = document.getElementById('free-tools');
 const removeCaseEl = document.getElementById('remove-case');
@@ -2386,7 +2399,7 @@ window.__shelf = {
   },
   setDims: (raw) => changeDims(raw),
   turns: TURNS,
-  get limits() { return { SHELF_W, BOOK_D, CASE_D, BOOK_Z, SHELVES, TWO_DEEP, clears: ROW_CLEAR, floors: ROW_FLOOR }; },
+  get limits() { return { SHELF_W, CASE_W, CASE_H, TOP_CLEAR, BOOK_D, CASE_D, BOOK_Z, SHELVES, TWO_DEEP, clears: ROW_CLEAR, floors: ROW_FLOOR }; },
   // Books in free float that nothing holds up, per shelf.
   unstable: () => {
     const shelves = new Set(Object.values(free.books).map((p) => p.shelf));
