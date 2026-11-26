@@ -261,7 +261,7 @@ function loadFigures() {
     const saved = JSON.parse(localStorage.getItem(FIGURES_KEY));
     if (!Array.isArray(saved)) return [];
     return saved
-      .filter((f) => f && FIGURE_SIZES[f.size] && [f.shelf, f.x, f.z].every(Number.isFinite) && f.shelf >= 0)
+      .filter((f) => f && FIGURE_SIZES[f.size] && [f.shelf, f.x, f.z].every(Number.isFinite))
       .map((f) => ({
         id: String(f.id), name: String(f.name ?? '').slice(0, 80), size: f.size,
         shelf: Math.floor(f.shelf), x: f.x, z: f.z,
@@ -274,13 +274,13 @@ function loadFigures() {
 // Each figure is { id, name, size, shelf, x, z }, with x and z measured like a book's.
 let figures = loadFigures();
 
-// Where a figure of this size may stand at x, z on a shelf: under the board above, between the
-// side panels, clear of the other figures. Returns { x, z } or null.
+// Where a figure of this size may stand at x, z on a shelf or a bookcase top: under the board
+// above, within the surface, clear of the other figures. Returns { x, z } or null.
 function figureFits(list, id, sizeKey, shelf, x, z) {
   const { w, h } = FIGURE_SIZES[sizeKey];
   const [back, front] = zRange(w);
   const surf = surface(shelf);
-  if (surf.top || w > surf.width || back > front + 1e-9 || h > surf.clear) return null; // figures stay inside a case
+  if (w > surf.width || back > front + 1e-9 || h > surf.clear) return null;
   x = clamp(x, w / 2, surf.width - w / 2);
   z = clamp(z, back, Math.max(back, front));
   for (const other of list) {
@@ -1041,7 +1041,11 @@ function layoutFor(list, mode) {
       x += SERIES_GAP;
     }
   }
-  for (const f of figures) shelf = Math.max(shelf, f.shelf);
+  for (const f of figures) {
+    const surf = surface(f.shelf);
+    if (surf.top) minCases = Math.max(minCases, surf.case + 1);
+    else shelf = Math.max(shelf, f.shelf);
+  }
   const cases = Math.max(minCases, surface(shelf).case + 1);
   // Where a surface is: its bookcase's centre, the left end of its x range, and the height of its floor.
   const origin = (index) => {
@@ -1557,8 +1561,11 @@ function flyTo(center, width, height, minDistance = 10) {
 }
 
 function overview(instant) {
-  const crowned = layout.slots.some((slot) => slot.shelf < 0); // books standing on top of a case
-  const height = CASE_H + (crowned ? 2.2 : 0);
+  const tall = [
+    ...layout.slots.filter((slot) => slot.shelf < 0).map((slot) => slot.y + slot.h / 2),
+    ...figures.filter((f) => f.shelf < 0).map((f) => FIGURE_SIZES[f.size].h),
+  ];
+  const height = CASE_H + (tall.length ? Math.max(...tall) + 0.4 : 0); // keep what stands on top in view
   flyTo(new THREE.Vector3(0, height / 2, 0), layout.cases * CASE_W, height);
   if (instant) {
     camera.position.copy(cameraGoal.position);
@@ -2123,7 +2130,7 @@ const LAYOUT_NOTES = {
   standard: 'One row of upright books per shelf.',
   efficient: 'Two rows deep, the back row raised on risers so it shows, flat stacks on top of it.',
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
-  free: 'Drag a book to any spot on any shelf or onto the top of a bookcase, and scroll while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
+  free: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase, and scroll while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
 };
 const freeTools = document.getElementById('free-tools');
 const removeCaseEl = document.getElementById('remove-case');
