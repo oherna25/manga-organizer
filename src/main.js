@@ -1505,6 +1505,7 @@ function syncScene() {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.position.copy(slot.position);
+      mesh.quaternion.copy(ORIENT[slot.o].quat); // a book that starts out flat or turned does not topple in
       if (!firstSync) mesh.position.add(new THREE.Vector3(0, 0.3, 2.5)); // new books slide in from the front
       mesh.add(new THREE.Mesh(badgeGeometry, badgeMaterial(slot.vol)));
       books.set(slot.key, mesh);
@@ -1513,7 +1514,7 @@ function syncScene() {
     layBadge(mesh, slot.look, slot.o);
     mesh.material = materialsFor(slot.series, slot.look);
     mesh.scale.set(slot.look.thickness, slot.look.height, BOOK_D);
-    mesh.userData = { slot };
+    mesh.userData.slot = slot; // keep the rest of userData: the fall and turn state live there
   }
   for (const [key, mesh] of books) {
     if (live.has(key)) continue;
@@ -2429,6 +2430,56 @@ const goal = new THREE.Vector3();
 // A pulled-out book is turned so its front cover (+x face) faces the room.
 const COVER_OUT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
 
+const GRAVITY = 60; // units per second squared; a unit is 10 cm
+const BOUNCE = 0.25; // how much speed a landing keeps
+const BOUNCE_MIN = 0.8; // a bounce slower than this is not one
+const HOVER = 0.25; // how far a book in hand floats above where it would rest
+const TOPPLE = 40; // how fast a book falling over speeds up its turn, in radians per second squared
+
+// Move a book to the height it rests at. Up and sideways keep the ease; down is a fall with a
+// bounce or two. The velocity lives on the mesh so it survives syncScene.
+function dropTo(mesh, goalY, dt, ease) {
+  const { position } = mesh;
+  let vy = mesh.userData.vy ?? 0;
+  if (goalY > position.y + 1e-4 || (!vy && goalY > position.y - 1e-4)) {
+    mesh.userData.vy = 0;
+    position.y += (goalY - position.y) * ease;
+    return;
+  }
+  vy -= GRAVITY * dt;
+  position.y += vy * dt;
+  if (position.y <= goalY) {
+    position.y = goalY;
+    vy = -vy * BOUNCE;
+    if (vy < BOUNCE_MIN) vy = 0;
+  }
+  mesh.userData.vy = vy;
+}
+
+// Turn a book to its orientation. A book falling over starts slowly and speeds up so it slams
+// down. One that was in the hand or pulled out to show its cover eases as before, until it is
+// back where it belongs.
+function turnTo(mesh, target, easing, dt, ease) {
+  const data = mesh.userData;
+  if (easing) data.eased = true;
+  if (data.eased) {
+    mesh.quaternion.slerp(target, ease);
+    data.spin = 0;
+    if (!easing && mesh.quaternion.angleTo(target) < 0.02) {
+      mesh.quaternion.copy(target);
+      data.eased = false;
+    }
+    return;
+  }
+  if (mesh.quaternion.angleTo(target) < 1e-4) {
+    mesh.quaternion.copy(target);
+    data.spin = 0;
+    return;
+  }
+  data.spin = (data.spin ?? 0) + TOPPLE * dt;
+  mesh.quaternion.rotateTowards(target, data.spin * dt);
+}
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const ease = 1 - Math.exp(-dt * 10);
@@ -2440,15 +2491,23 @@ function tick() {
     const pushed = drag && drag.moved && drag.spot && drag.spot.pushed?.[slot.key]; // shoved aside by the book in hand
     if (pushed) goal.x += pushed.x - slot.x;
     const inspected = slot.key === inspectedKey;
-    if (held) goal.z += 0.1; // lifted a little towards you while it is in your hand
-    else if (inspected) goal.z = INSPECT_Z;
+    if (held) {
+      goal.z += 0.1; // lifted a little towards you while it is in your hand
+      goal.y += HOVER; // and hovering, so letting go drops it into place
+    } else if (inspected) goal.z = INSPECT_Z;
     else if (!slot.pullable) {
       // Back-row books stay put: the front row is in the way.
     } else if (mesh === hovered) goal.z += 0.45;
     else if (slot.series.id === selectedId) goal.z += 0.2;
-    mesh.position.lerp(goal, held ? 1 - Math.exp(-dt * 30) : ease);
+    const follow = held ? 1 - Math.exp(-dt * 30) : ease;
+    mesh.position.x += (goal.x - mesh.position.x) * follow;
+    mesh.position.z += (goal.z - mesh.position.z) * follow;
+    if (held) {
+      mesh.userData.vy = 0;
+      mesh.position.y += (goal.y - mesh.position.y) * follow;
+    } else dropTo(mesh, goal.y, dt, ease);
     // Turn the pulled-out book so its front cover (+x face) faces the room.
-    mesh.quaternion.slerp(inspected && !held ? COVER_OUT : ORIENT[held ? held.o : slot.o].quat, ease);
+    turnTo(mesh, inspected && !held ? COVER_OUT : ORIENT[held ? held.o : slot.o].quat, held || inspected, dt, ease);
   }
 
   for (const group of figureGroup.children) {
