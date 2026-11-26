@@ -547,6 +547,86 @@ function dropSpot(shelf, bodies, look, x, z, o, magnet = false) {
   return { x, y: floor + h / 2, z, o };
 }
 
+const collide = (a, b) => overlaps(a, b.x, b.z, b.w, b.d) && Math.abs(a.y - b.y) < (a.h + b.h) / 2 - 1e-4;
+
+// Stand a book on the floor of a surface at x, z and shove its neighbours aside to make room, the
+// way books on a real shelf move along. Left neighbours go left and right ones go right, each
+// pushing the next, and the surface's ends stop them. A row packed to one side still has its slack
+// at the other end, so when one side runs out of room the book slides towards the side that has
+// some. Returns a spot with `pushed: { key: { x } }`, or null when the pushes do not fit.
+function wedge(shelf, bodies, look, x, z, o) {
+  const { w, h, d } = extent(look, o);
+  const surf = surface(shelf);
+  const [back, front] = zRange(d);
+  if (w > surf.width || back > front + 1e-9 || h > surf.clear + 1e-6) return null;
+  x = clamp(x, w / 2, surf.width - w / 2);
+  const limit = Math.min(front, frontLimit(bodies, x, w, d));
+  if (limit < back - 1e-9) return null;
+  z = clamp(z, back, Math.max(back, limit));
+  const movable = bodies.filter((body) => !body.fig);
+  const sides = [
+    { dir: -1, list: movable.filter((body) => body.x < x).sort((a, b) => b.x - a.x) },
+    { dir: 1, list: movable.filter((body) => body.x >= x).sort((a, b) => a.x - b.x) },
+  ];
+  // Push one side's books away from the standing book, nearest first. `short` is how far the last
+  // ones would have to go past the end of the surface.
+  const push = (side, standing) => {
+    const placed = [standing];
+    const moved = new Map();
+    let short = 0;
+    for (const body of side.list) {
+      let nx = body.x;
+      for (const other of placed) {
+        if (Math.abs(other.z - body.z) >= (other.d + body.d) / 2 - 1e-4) continue;
+        if (Math.abs(other.y - body.y) >= (other.h + body.h) / 2 - 1e-4) continue;
+        const gap = -side.dir * (other.x - nx) - (other.w + body.w) / 2; // room left between the two
+        if (gap < 0) nx -= side.dir * gap;
+      }
+      const overshoot = side.dir < 0 ? body.w / 2 - nx : nx + body.w / 2 - surf.width;
+      short = Math.max(short, overshoot);
+      if (nx !== body.x) moved.set(body.key, nx);
+      placed.push({ ...body, x: nx });
+    }
+    return { moved, short: short > 1e-9 ? short : 0 };
+  };
+  let xs = x;
+  let slide = 0; // which way the book has been moved to find room
+  for (let tries = 0; tries < 8; tries++) {
+    if (xs < w / 2 - 1e-9 || xs > surf.width - w / 2 + 1e-9) return null;
+    const standing = { x: xs, y: h / 2, z, w, h, d };
+    const [left, right] = sides.map((side) => push(side, standing));
+    if (!left.short && !right.short) {
+      const moved = new Map([...left.moved, ...right.moved]);
+      const now = bodies.map((body) => (moved.has(body.key) ? { ...body, x: moved.get(body.key) } : body));
+      const clear =
+        now.every((body) => !collide(body, standing)) &&
+        now.every((body, i) => !moved.has(body.key) || now.every((other, j) => i === j || !collide(body, other)));
+      if (!clear) return null;
+      return { x: xs, y: h / 2, z, o, pushed: Object.fromEntries([...moved].map(([key, px]) => [key, { x: px }])) };
+    }
+    if (left.short && right.short) return null;
+    const dir = left.short ? 1 : -1;
+    if (slide && slide !== dir) return null; // room on one side cost room on the other
+    slide = dir;
+    xs += dir * (left.short || right.short);
+  }
+  return null;
+}
+
+// Where a dragged book comes to rest. A book that dropSpot refuses, or that would perch on top of
+// other books, is wedged in between its neighbours if they can be pushed apart, and otherwise laid
+// flat across the tops of the row. Flat books are only stacked, never wedged.
+function placeSpot(shelf, bodies, look, x, z, o) {
+  const spot = dropSpot(shelf, bodies, look, x, z, o, true);
+  const { w, h } = extent(look, o);
+  if (spot && spot.y - h / 2 < 1e-6) return spot;
+  return (
+    (h > w && wedge(shelf, bodies, look, x, z, o)) ||
+    (o !== FLAT && dropSpot(shelf, bodies, look, x, z, FLAT, true)) ||
+    spot
+  );
+}
+
 // Let every book on a shelf fall until it rests on something. Edits `books` in place.
 function settle(books, shelf) {
   const bodies = bodiesIn(books, shelf).sort((a, b) => a.y - a.h / 2 - (b.y - b.h / 2));
@@ -1674,8 +1754,8 @@ function updateDrag() {
   const hit = planeHit(drag.event, drag.z + BOOK_D / 2);
   if (!hit) return false;
   const { shelf, floorY, left } = shelfAt(hit);
-  const spot = dropSpot(
-    shelf, bodiesIn(free.books, shelf, drag.slot.key), drag.slot.look, hit.x - drag.offsetX - left, drag.z, drag.o, true,
+  const spot = placeSpot(
+    shelf, bodiesIn(free.books, shelf, drag.slot.key), drag.slot.look, hit.x - drag.offsetX - left, drag.z, drag.o,
   );
   if (!spot) return false;
   drag.z = spot.z;
@@ -1691,11 +1771,12 @@ function endDrag() {
 }
 
 function moveBook(slot, spot) {
-  const same = spot.shelf === slot.shelf && spot.o === slot.o &&
+  const same = spot.shelf === slot.shelf && spot.o === slot.o && !spot.pushed &&
     Math.hypot(spot.x - slot.x, spot.y - slot.y, spot.z - slot.z) < 1e-4;
   if (same) return;
   snapshot();
   const books = { ...free.books, [slot.key]: { shelf: spot.shelf, x: spot.x, y: spot.y, z: spot.z, o: spot.o } };
+  for (const [key, { x }] of Object.entries(spot.pushed ?? {})) books[key] = { ...books[key], x };
   stabilize(books, slot.shelf); // whatever stood on it or leaned on it falls
   if (spot.shelf !== slot.shelf) stabilize(books, spot.shelf);
   apply(series, { ...free, books });
@@ -2318,6 +2399,8 @@ function tick() {
     const { slot } = mesh.userData;
     const held = drag && drag.mesh === mesh && drag.moved && drag.spot ? drag.spot : null;
     goal.copy(held ? held.position : slot.position);
+    const pushed = drag && drag.moved && drag.spot && drag.spot.pushed?.[slot.key]; // shoved aside by the book in hand
+    if (pushed) goal.x += pushed.x - slot.x;
     const inspected = slot.key === inspectedKey;
     if (held) goal.z += 0.1; // lifted a little towards you while it is in your hand
     else if (inspected) goal.z = INSPECT_Z;
@@ -2362,9 +2445,14 @@ window.__shelf = {
   books,
   layoutFor: (mode) => computeLayout(series, mode),
   get free() { return free; },
-  // Where book `key` would rest if dropped at x, z on a shelf (null when it does not fit).
-  dropSpot: (key, shelf, x, z, o = 0) =>
-    dropSpot(shelf, bodiesIn(free.books, shelf, key), lookById.get(seriesIdOf(key)), x, z, o),
+  // Where book `key` would rest if dropped at x, z on a shelf (null when it does not fit). With
+  // `drag`, the way a drag resolves it: magnet, wedging between neighbours, lying across the tops.
+  // A negative shelf is the top of a bookcase.
+  dropSpot: (key, shelf, x, z, o = 0, drag = false) => {
+    const bodies = bodiesIn(free.books, shelf, key);
+    const look = lookById.get(seriesIdOf(key));
+    return drag ? placeSpot(shelf, bodies, look, x, z, o) : dropSpot(shelf, bodies, look, x, z, o);
+  },
   moveBook: (key, shelf, x, z, o = 0) => {
     const slot = layout.slots.find((item) => item.key === key);
     const spot = slot && window.__shelf.dropSpot(key, shelf, x, z, o);
@@ -2376,7 +2464,7 @@ window.__shelf = {
   // keep-together option or a right-click pick says so.
   dropBook: (key, shelf, x, z, o = 0) => {
     const slot = layout.slots.find((item) => item.key === key);
-    const spot = slot && dropSpot(shelf, bodiesIn(free.books, shelf, key), slot.look, x, z, o, true);
+    const spot = slot && placeSpot(shelf, bodiesIn(free.books, shelf, key), slot.look, x, z, o);
     if (spot) dropBook(slot, { ...spot, shelf });
     return spot;
   },
