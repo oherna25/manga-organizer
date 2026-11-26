@@ -214,8 +214,22 @@ function deriveCase() {
 }
 deriveCase();
 
-// A shelf index counts rows through every bookcase: case * SHELVES + row.
-const clearOf = (shelf) => ROW_CLEAR[shelf % SHELVES];
+// A shelf index names a surface that books stand on. Interior shelves count rows through every
+// bookcase: case * SHELVES + row. A surface is { case, row, top, floorY, clear, width, walls }:
+// the bookcase it belongs to, how high a book may stand there, how far x runs from the surface's
+// left edge, and whether side panels stand at its ends.
+function surface(shelf) {
+  const row = shelf % SHELVES;
+  return { case: Math.floor(shelf / SHELVES), row, top: false, floorY: ROW_FLOOR[row], clear: ROW_CLEAR[row], width: SHELF_W, walls: true };
+}
+const shelfOf = (bookcase, row) => bookcase * SHELVES + row;
+// Where a shelf index goes when the bookcase changes from `oldShelves` rows to the current count,
+// or null when that row is gone.
+function remapShelf(shelf, oldShelves) {
+  const row = shelf % oldShelves;
+  return row < SHELVES ? shelfOf(Math.floor(shelf / oldShelves), row) : null;
+}
+const clearOf = (shelf) => surface(shelf).clear;
 // A riser is as tall as the headroom allows, and left out where a raised book would not fit.
 function riserFor(clear) {
   const headroom = Math.min(MAX_RISER, clear - MAX_BOOK_H);
@@ -258,8 +272,9 @@ let figures = loadFigures();
 function figureFits(list, id, sizeKey, shelf, x, z) {
   const { w, h } = FIGURE_SIZES[sizeKey];
   const [back, front] = zRange(w);
-  if (w > SHELF_W || back > front + 1e-9 || h > clearOf(shelf)) return null;
-  x = clamp(x, w / 2, SHELF_W - w / 2);
+  const surf = surface(shelf);
+  if (w > surf.width || back > front + 1e-9 || h > surf.clear) return null;
+  x = clamp(x, w / 2, surf.width - w / 2);
   z = clamp(z, back, Math.max(back, front));
   for (const other of list) {
     if (other.id === id || other.shelf !== shelf) continue;
@@ -349,7 +364,6 @@ function lookOf(s) {
 
 const cssColor = (look) => `hsl(${look.hue} ${look.sat}% ${look.light}%)`;
 const caseX = (index, cases) => (index - (cases - 1) / 2) * CASE_W;
-const shelfY = (row) => ROW_FLOOR[row];
 
 // Efficient layout, per shelf:
 //   1. a front row of upright books on the shelf board,
@@ -473,8 +487,9 @@ function restOn(bodies, x, z, w, d) {
 function dropSpot(shelf, bodies, look, x, z, o, magnet = false) {
   const { w, h, d } = extent(look, o);
   const [back, front] = zRange(d);
-  if (w > SHELF_W || back > front + 1e-9) return null; // too long or too deep for this bookcase
-  const fit = (value) => clamp(value, w / 2, SHELF_W - w / 2);
+  const surf = surface(shelf);
+  if (w > surf.width || back > front + 1e-9) return null; // too long or too deep for this bookcase
+  const fit = (value) => clamp(value, w / 2, surf.width - w / 2);
   const thin = magnet ? tipAxis({ w, h, d }) : null;
   x = fit(x);
   const limit = Math.min(front, frontLimit(bodies, x, w, d));
@@ -505,7 +520,7 @@ function dropSpot(shelf, bodies, look, x, z, o, magnet = false) {
       if (restOn(bodies, beside, z, w, d) <= floor + 1e-6) best = { beside, reach };
     };
     offer(w / 2);
-    offer(SHELF_W - w / 2);
+    offer(surf.width - w / 2);
     for (const body of bodies) {
       const level = Math.abs(body.z - z) < (body.d + d) / 2 - 1e-4 &&
         body.y + body.h / 2 > floor + 1e-6 && body.y - body.h / 2 < floor + h;
@@ -518,7 +533,7 @@ function dropSpot(shelf, bodies, look, x, z, o, magnet = false) {
       floor = restOn(bodies, x, z, w, d);
     }
   }
-  if (floor + h > clearOf(shelf) + 1e-6) return null;
+  if (floor + h > surf.clear + 1e-6) return null;
   if (z > frontLimit(bodies, x, w, d) + 1e-6) return null; // it slid in front of a figure
   return { x, y: floor + h / 2, z, o };
 }
@@ -543,7 +558,7 @@ function settle(books, shelf) {
 // together to be as wide as 30% of their height. A book facing out stands if it leans on the
 // back panel or on something behind or in front of it. Returns each book with where it would
 // land, most likely direction first.
-function unstable(bodies) {
+function unstable(bodies, surf) {
   const span = (a, b) => Math.min(a.y + a.h / 2, b.y + b.h / 2) - Math.max(a.y - a.h / 2, b.y - b.h / 2);
   const besideX = (a, b) =>
     Math.abs(a.x - b.x) - (a.w + b.w) / 2 <= TOUCH && Math.abs(a.z - b.z) < (a.d + b.d) / 2 - 1e-4;
@@ -580,14 +595,14 @@ function unstable(bodies) {
   for (const members of groups.values()) {
     const propped = members.some(
       (m) =>
-        m.x - m.w / 2 <= TOUCH || m.x + m.w / 2 >= SHELF_W - TOUCH ||
+        (surf.walls && (m.x - m.w / 2 <= TOUCH || m.x + m.w / 2 >= surf.width - TOUCH)) ||
         bodies.some((b) => tipAxis(b) !== 'x' && besideX(m, b) && span(m, b) >= 0.3 * m.h),
     );
     const tall = Math.max(...members.map((m) => m.h));
     if (propped || members.reduce((sum, m) => sum + m.w, 0) >= 0.3 * tall) continue;
     const right = Math.max(...members.map((m) => m.x + m.w / 2));
     const left = Math.min(...members.map((m) => m.x - m.w / 2));
-    const dir = right + tall <= SHELF_W || left - tall < 0 ? 1 : -1; // towards the side with room
+    const dir = right + tall <= surf.width || left - tall < 0 ? 1 : -1; // towards the side with room
     members.sort((a, b) => dir * (b.x - a.x)); // the one at the falling end goes first
     for (const m of members) out.push({ body: m, options: [fallX(m, dir), fallX(m, -dir)] });
   }
@@ -604,12 +619,14 @@ function unstable(bodies) {
 
 // Where a tipping book ends up when it cannot fall flat: against the nearest thing it would hit
 // on the way down, nearest first. Each is { x, z } for the book still upright.
-function leanSpots(m, others, within = m.h) {
+function leanSpots(m, others, surf, within = m.h) {
   if (tipAxis(m) === 'z') return [{ x: m.x, z: zRange(m.d)[0], reach: 0 }]; // back against the panel
-  const spots = [
-    { x: m.w / 2, reach: m.x - m.w / 2 },
-    { x: SHELF_W - m.w / 2, reach: SHELF_W - m.x - m.w / 2 },
-  ];
+  const spots = surf.walls
+    ? [
+        { x: m.w / 2, reach: m.x - m.w / 2 },
+        { x: surf.width - m.w / 2, reach: surf.width - m.x - m.w / 2 },
+      ]
+    : [];
   for (const b of others) {
     const tall = Math.min(m.y + m.h / 2, b.y + b.h / 2) - Math.max(m.y - m.h / 2, b.y - b.h / 2) >= 0.3 * m.h;
     if (!tall || Math.abs(b.z - m.z) >= (b.d + m.d) / 2 - 1e-4) continue;
@@ -626,10 +643,11 @@ function leanSpots(m, others, within = m.h) {
 // something in the way of its fall comes to rest leaning on that instead, and one with no room
 // to do either stays where it is.
 function stabilize(books, shelf) {
+  const surf = surface(shelf);
   const stuck = new Set();
   for (let pass = 0; pass < 40; pass++) {
     settle(books, shelf);
-    const fallers = unstable(bodiesIn(books, shelf)).filter((faller) => !stuck.has(faller.body.key));
+    const fallers = unstable(bodiesIn(books, shelf), surf).filter((faller) => !stuck.has(faller.body.key));
     if (!fallers.length) return;
     for (const { body, options } of fallers) {
       const others = bodiesIn(books, shelf, body.key);
@@ -645,7 +663,7 @@ function stabilize(books, shelf) {
         }
       }
       if (!landed) {
-        for (const lean of leanSpots(body, others)) {
+        for (const lean of leanSpots(body, others, surf)) {
           const spot = dropSpot(shelf, others, look, lean.x, lean.z, body.o);
           const moved = spot && Math.hypot(spot.x - body.x, spot.z - body.z) > 1e-6;
           if (moved && Math.abs(spot.x - lean.x) < 1e-6 && spot.y <= body.y + 1e-6) {
@@ -674,7 +692,8 @@ function seedFree(mode) {
 // The first gap in the front row that is wide enough, on the first shelf that has one.
 function firstGap(books, width, height, from = 0) {
   for (let shelf = from; ; shelf++) {
-    if (height > clearOf(shelf)) continue; // too short for this book; one row always is tall enough
+    const surf = surface(shelf);
+    if (height > surf.clear) continue; // too short for this book; one row always is tall enough
     const row = bodiesIn(books, shelf)
       .filter((body) => body.fig || Math.abs(body.z - BOOK_Z) < (body.d + BOOK_D) / 2 - 1e-4)
       .sort((a, b) => a.x - a.w / 2 - (b.x - b.w / 2));
@@ -683,7 +702,7 @@ function firstGap(books, width, height, from = 0) {
       if (body.x - body.w / 2 - x >= width - 1e-6) break;
       x = Math.max(x, body.x + body.w / 2);
     }
-    if (x + width <= SHELF_W + 1e-6) return { shelf, x: x + width / 2 };
+    if (x + width <= surf.width + 1e-6) return { shelf, x: x + width / 2 };
   }
 }
 
@@ -743,7 +762,7 @@ function reconcileFree(seedMode) {
     let place = null;
     if (prev && prev.o === 0) {
       const x = prev.x + look.thickness / 2 + w / 2;
-      const spot = x + w / 2 <= SHELF_W && dropSpot(prev.shelf, bodiesIn(books, prev.shelf), look, x, prev.z, 0);
+      const spot = x + w / 2 <= surface(prev.shelf).width && dropSpot(prev.shelf, bodiesIn(books, prev.shelf), look, x, prev.z, 0);
       if (spot && Math.abs(spot.x - x) < 1e-6 && Math.abs(spot.y - h / 2) < 1e-6) place = { shelf: prev.shelf, ...spot };
     }
     if (!place) {
@@ -766,9 +785,8 @@ function refitFree(oldShelves) {
   const books = {};
   const byShelf = new Map(); // new shelf -> bodies placed so far
   for (const [key, p] of entries) {
-    const row = p.shelf % oldShelves;
-    if (row >= SHELVES) continue; // that shelf is gone
-    const shelf = Math.floor(p.shelf / oldShelves) * SHELVES + row;
+    const shelf = remapShelf(p.shelf, oldShelves);
+    if (shelf === null) continue; // that shelf is gone
     if (!byShelf.has(shelf)) byShelf.set(shelf, figures.filter((f) => f.shelf === shelf).map(figureBody));
     const look = lookById.get(seriesIdOf(key));
     const spot = dropSpot(shelf, byShelf.get(shelf), look, p.x, p.z, p.o);
@@ -786,7 +804,7 @@ function refitFree(oldShelves) {
 function findFigureSpot(list, sizeKey) {
   const { w } = FIGURE_SIZES[sizeKey];
   const last = Math.max(0, ...layout.slots.map((slot) => slot.shelf), ...list.map((f) => f.shelf));
-  const end = (Math.floor(last / SHELVES) + 2) * SHELVES;
+  const end = shelfOf(surface(last).case + 2, 0);
   const order = [];
   for (let shelf = last; shelf < end; shelf++) order.push(shelf);
   for (let shelf = 0; shelf < last; shelf++) order.push(shelf);
@@ -794,7 +812,7 @@ function findFigureSpot(list, sizeKey) {
     layout.slots.some((slot) => slot.shelf === shelf && Math.abs(slot.x - x) < (extent(slot.look, slot.o).w + w) / 2);
   for (const needEmpty of [true, false]) {
     for (const shelf of order) {
-      for (let x = w / 2; x <= SHELF_W - w / 2 + 1e-9; x += 0.1) {
+      for (let x = w / 2; x <= surface(shelf).width - w / 2 + 1e-9; x += 0.1) {
         const spot = figureFits(list, null, sizeKey, shelf, x, Infinity);
         if (spot && !(needEmpty && crowded(shelf, x))) return { shelf, ...spot };
       }
@@ -809,9 +827,8 @@ function refitFigures(oldShelves) {
   const kept = [];
   let lost = 0;
   for (const f of figures) {
-    const row = f.shelf % oldShelves;
-    const shelf = Math.floor(f.shelf / oldShelves) * SHELVES + row;
-    const spot = row < SHELVES ? figureFits(kept, f.id, f.size, shelf, f.x, f.z) : null;
+    const shelf = remapShelf(f.shelf, oldShelves);
+    const spot = shelf !== null ? figureFits(kept, f.id, f.size, shelf, f.x, f.z) : null;
     const place = spot ? { shelf, ...spot } : findFigureSpot(kept, f.size);
     if (place) kept.push({ ...f, ...place });
     else lost++;
@@ -896,18 +913,23 @@ function layoutFor(list, mode) {
     }
   }
   for (const f of figures) shelf = Math.max(shelf, f.shelf);
-  const cases = Math.max(minCases, Math.ceil((shelf + 1) / SHELVES));
-  const origin = (index) => ({ x: caseX(Math.floor(index / SHELVES), cases), y: shelfY(index % SHELVES) });
+  const cases = Math.max(minCases, surface(shelf).case + 1);
+  // Where a surface is: its bookcase's centre, the left end of its x range, and the height of its floor.
+  const origin = (index) => {
+    const surf = surface(index);
+    const x = caseX(surf.case, cases);
+    return { x, left: x - surf.width / 2, y: surf.floorY };
+  };
   for (const slot of slots) {
     const o = origin(slot.shelf);
-    slot.position = new THREE.Vector3(o.x - SHELF_W / 2 + slot.x, o.y + slot.y, slot.z);
+    slot.position = new THREE.Vector3(o.left + slot.x, o.y + slot.y, slot.z);
   }
   return {
     slots,
     cases,
     figures: figures.map((f) => {
       const o = origin(f.shelf);
-      return { fig: f, position: new THREE.Vector3(o.x - SHELF_W / 2 + f.x, o.y, figureZ(f)) };
+      return { fig: f, position: new THREE.Vector3(o.left + f.x, o.y, figureZ(f)) };
     }),
     risers: risers.map((riser) => {
       const o = origin(riser.shelf);
@@ -1510,8 +1532,9 @@ function shelfAt(hit) {
   const column = clamp(Math.round((hit.x - caseX(0, cases)) / CASE_W), 0, cases - 1);
   let level = 0; // the highest board the pointer is above
   for (let k = 1; k < SHELVES; k++) if (hit.y >= BOARD_Y[k]) level = k;
-  const row = SHELVES - 1 - level;
-  return { shelf: column * SHELVES + row, row, left: caseX(column, cases) - SHELF_W / 2 };
+  const shelf = shelfOf(column, SHELVES - 1 - level);
+  const surf = surface(shelf);
+  return { shelf, floorY: surf.floorY, left: caseX(column, cases) - surf.width / 2 };
 }
 
 // Figures: drag one to another spot or shelf, in any layout. In free float the wheel moves it
@@ -1521,12 +1544,12 @@ let figDrag = null; // { group, fig, event, offsetX, z, moved, spot }
 function updateFigDrag() {
   const hit = planeHit(figDrag.event, figDrag.group.userData.position.z);
   if (!hit) return false;
-  const { shelf, row, left } = shelfAt(hit);
+  const { shelf, floorY, left } = shelfAt(hit);
   const { fig } = figDrag;
   const fit = figureFits(figures, fig.id, fig.size, shelf, hit.x - figDrag.offsetX - left, layoutMode === 'free' ? figDrag.z : Infinity);
   if (!fit) return false;
   if (layoutMode === 'free') figDrag.z = fit.z;
-  figDrag.spot = { shelf, x: fit.x, z: fit.z, position: new THREE.Vector3(left + fit.x, shelfY(row), fit.z) };
+  figDrag.spot = { shelf, x: fit.x, z: fit.z, position: new THREE.Vector3(left + fit.x, floorY, fit.z) };
   return true;
 }
 
@@ -1637,13 +1660,13 @@ function startMoving() {
 function updateDrag() {
   const hit = planeHit(drag.event, drag.z + BOOK_D / 2);
   if (!hit) return false;
-  const { shelf, row, left } = shelfAt(hit);
+  const { shelf, floorY, left } = shelfAt(hit);
   const spot = dropSpot(
     shelf, bodiesIn(free.books, shelf, drag.slot.key), drag.slot.look, hit.x - drag.offsetX - left, drag.z, drag.o, true,
   );
   if (!spot) return false;
   drag.z = spot.z;
-  drag.spot = { ...spot, shelf, position: new THREE.Vector3(left + spot.x, shelfY(row) + spot.y, spot.z) };
+  drag.spot = { ...spot, shelf, position: new THREE.Vector3(left + spot.x, floorY + spot.y, spot.z) };
   return true;
 }
 
@@ -1684,10 +1707,10 @@ function moveSeries(slot, spot) {
   }
   let shelf = spot.shelf;
   let z = spot.z;
-  let x = clamp(spot.x, w / 2, SHELF_W - w / 2);
+  let x = clamp(spot.x, w / 2, surface(shelf).width - w / 2);
   for (const key of keys) {
     let place = null;
-    if (x + w / 2 <= SHELF_W + 1e-9) {
+    if (x + w / 2 <= surface(shelf).width + 1e-9) {
       const next = dropSpot(shelf, bodiesIn(books, shelf), look, x, z, 0);
       if (next && Math.abs(next.x - x) < 1e-6 && Math.abs(next.z - z) < 1e-6) place = { shelf, ...next };
     }
@@ -1712,11 +1735,10 @@ let keepTogether = TOGETHER_MODES.includes(localStorage.getItem(TOGETHER_KEY)) ?
 let groupId = null; // series picked with a right-click
 
 function dropBook(slot, spot) {
-  const bookcase = (shelf) => Math.floor(shelf / SHELVES);
   const follows =
     groupId === slot.series.id ||
     (keepTogether === 'shelf' && spot.shelf !== slot.shelf) ||
-    (keepTogether === 'bookcase' && bookcase(spot.shelf) !== bookcase(slot.shelf));
+    (keepTogether === 'bookcase' && surface(spot.shelf).case !== surface(slot.shelf).case);
   if (follows && slot.series.count > 1) moveSeries(slot, spot);
   else moveBook(slot, spot);
 }
@@ -1727,10 +1749,11 @@ function standUp(slot) {
   if (slot.o === 0) return;
   const others = bodiesIn(free.books, slot.shelf, slot.key);
   const upright = extent(slot.look, 0);
+  const surf = surface(slot.shelf);
   const stands = (spot) =>
-    !unstable([...others, { key: slot.key, shelf: slot.shelf, ...spot, ...upright }]).some((f) => f.body.key === slot.key);
+    !unstable([...others, { key: slot.key, shelf: slot.shelf, ...spot, ...upright }], surf).some((f) => f.body.key === slot.key);
   const here = { ...upright, x: slot.x, y: upright.h / 2, z: clamp(slot.z, ...zRange(upright.d)) };
-  for (const place of [here, ...leanSpots(here, others, Infinity)]) {
+  for (const place of [here, ...leanSpots(here, others, surf, Infinity)]) {
     const spot = dropSpot(slot.shelf, others, slot.look, place.x, place.z, 0, true);
     if (spot && stands(spot)) {
       moveBook(slot, { ...spot, shelf: slot.shelf });
@@ -2002,8 +2025,8 @@ function renderLayoutNote() {
 // Bookcases holding no books and no figures, wherever they are in the row.
 function emptyCases() {
   const used = new Set();
-  for (const slot of layout.slots) used.add(Math.floor(slot.shelf / SHELVES));
-  for (const f of figures) used.add(Math.floor(f.shelf / SHELVES));
+  for (const slot of layout.slots) used.add(surface(slot.shelf).case);
+  for (const f of figures) used.add(surface(f.shelf).case);
   const empty = [];
   for (let index = 0; index < layout.cases; index++) if (!used.has(index)) empty.push(index);
   return empty;
@@ -2014,7 +2037,7 @@ function removeEmptyCases() {
   const empty = new Set(emptyCases());
   const moved = new Map(); // old bookcase index -> new one
   for (let index = 0; index < layout.cases; index++) if (!empty.has(index)) moved.set(index, moved.size);
-  const shift = (shelf) => moved.get(Math.floor(shelf / SHELVES)) * SHELVES + (shelf % SHELVES);
+  const shift = (shelf) => shelfOf(moved.get(surface(shelf).case), surface(shelf).row);
   const books = {};
   for (const [key, p] of Object.entries(free.books)) books[key] = { ...p, shelf: shift(p.shelf) };
   apply(series, { cases: Math.max(1, moved.size), books }, dims, figures.map((f) => ({ ...f, shelf: shift(f.shelf) })));
@@ -2367,6 +2390,6 @@ window.__shelf = {
   // Books in free float that nothing holds up, per shelf.
   unstable: () => {
     const shelves = new Set(Object.values(free.books).map((p) => p.shelf));
-    return [...shelves].flatMap((shelf) => unstable(bodiesIn(free.books, shelf)).map((f) => f.body.key));
+    return [...shelves].flatMap((shelf) => unstable(bodiesIn(free.books, shelf), surface(shelf)).map((f) => f.body.key));
   },
 };
