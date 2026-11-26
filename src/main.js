@@ -620,11 +620,12 @@ function placeSpot(shelf, bodies, look, x, z, o) {
   const spot = dropSpot(shelf, bodies, look, x, z, o, true);
   const { w, h } = extent(look, o);
   if (spot && spot.y - h / 2 < 1e-6) return spot;
-  return (
-    (h > w && wedge(shelf, bodies, look, x, z, o)) ||
-    (o !== FLAT && dropSpot(shelf, bodies, look, x, z, FLAT, true)) ||
-    spot
-  );
+  const wedged = h > w && wedge(shelf, bodies, look, x, z, o);
+  if (wedged) return wedged;
+  const flat = o !== FLAT && dropSpot(shelf, bodies, look, x, z, FLAT, true);
+  // Only show a flat book where it would stay: one with its centre past the row's end slides off.
+  if (flat && !overhung([...bodies, { key: 'held', ...flat, ...extent(look, FLAT) }]).some((f) => f.body.key === 'held')) return flat;
+  return spot;
 }
 
 // Let every book on a shelf fall until it rests on something. Edits `books` in place.
@@ -706,6 +707,36 @@ function unstable(bodies, surf) {
   return out;
 }
 
+// Books that rest on other bodies with their centre past the edge of what holds them up. They
+// slide off towards the open side. What holds a book up is the span of everything under it, so a
+// book bridging a hairline gap between two supports stays. Each comes with the spot just past the
+// edge it overhangs, the axis it overhangs most first.
+function overhung(bodies) {
+  const out = [];
+  for (const m of bodies) {
+    const bottom = m.y - m.h / 2;
+    if (m.fig || bottom < 1e-4) continue; // on the floor of its surface
+    const under = bodies.filter(
+      (b) => b !== m && Math.abs(b.y + b.h / 2 - bottom) < 1e-4 && overlaps(b, m.x, m.z, m.w, m.d),
+    );
+    if (!under.length) continue;
+    const reach = (axis, size) => [
+      Math.min(...under.map((b) => b[axis] - b[size] / 2)),
+      Math.max(...under.map((b) => b[axis] + b[size] / 2)),
+    ];
+    const [x0, x1] = reach('x', 'w');
+    const [z0, z1] = reach('z', 'd');
+    const past = (c, lo, hi) => (c < lo - 1e-6 ? c - lo : c > hi + 1e-6 ? c - hi : 0); // negative: past the low edge
+    const dx = past(m.x, x0, x1);
+    const dz = past(m.z, z0, z1);
+    const options = [];
+    if (dx) options.push({ by: Math.abs(dx), x: dx < 0 ? x0 - m.w / 2 : x1 + m.w / 2, z: m.z, o: m.o });
+    if (dz) options.push({ by: Math.abs(dz), x: m.x, z: dz < 0 ? z0 - m.d / 2 : z1 + m.d / 2, o: m.o });
+    if (options.length) out.push({ body: m, options: options.sort((a, b) => b.by - a.by), slide: true });
+  }
+  return out;
+}
+
 // Where a tipping book ends up when it cannot fall flat: against the nearest thing it would hit
 // on the way down, nearest first. Each is { x, z } for the book still upright.
 function leanSpots(m, others, surf, within = m.h) {
@@ -736,22 +767,29 @@ function stabilize(books, shelf) {
   const stuck = new Set();
   for (let pass = 0; pass < 40; pass++) {
     settle(books, shelf);
-    const fallers = unstable(bodiesIn(books, shelf), surf).filter((faller) => !stuck.has(faller.body.key));
+    const bodies = bodiesIn(books, shelf);
+    const tipping = unstable(bodies, surf);
+    const tipped = new Set(tipping.map((faller) => faller.body.key));
+    const sliding = overhung(bodies).filter((faller) => !tipped.has(faller.body.key));
+    const fallers = [...tipping, ...sliding].filter((faller) => !stuck.has(faller.body.key));
     if (!fallers.length) return;
-    for (const { body, options } of fallers) {
+    for (const { body, options, slide } of fallers) {
       const others = bodiesIn(books, shelf, body.key);
       const look = lookById.get(seriesIdOf(body.key));
       const bottom = body.y - body.h / 2;
       let landed = null;
       for (const option of options) {
         const spot = dropSpot(shelf, others, look, option.x, option.z, option.o);
-        // It may come down on books that fell before it, but not on top of something tall.
-        if (spot && spot.y - extent(look, option.o).h / 2 <= bottom + 0.4 * body.h) {
+        if (!spot) continue;
+        const low = spot.y - extent(look, option.o).h / 2;
+        // A tipping book may come down on books that fell before it, but not on top of something
+        // tall. A sliding one has to end up lower than it was, or it stays put.
+        if (slide ? low < bottom - 1e-6 : low <= bottom + 0.4 * body.h) {
           landed = spot;
           break;
         }
       }
-      if (!landed) {
+      if (!landed && !slide) {
         for (const lean of leanSpots(body, others, surf)) {
           const spot = dropSpot(shelf, others, look, lean.x, lean.z, body.o);
           const moved = spot && Math.hypot(spot.x - body.x, spot.z - body.z) > 1e-6;
@@ -2488,6 +2526,11 @@ window.__shelf = {
   setDims: (raw) => changeDims(raw),
   turns: TURNS,
   get limits() { return { SHELF_W, CASE_W, CASE_H, TOP_CLEAR, BOOK_D, CASE_D, BOOK_Z, SHELVES, TWO_DEEP, clears: ROW_CLEAR, floors: ROW_FLOOR }; },
+  // Books resting on others with their centre past what holds them up, per shelf.
+  overhung: () => {
+    const shelves = new Set(Object.values(free.books).map((p) => p.shelf));
+    return [...shelves].flatMap((shelf) => overhung(bodiesIn(free.books, shelf)).map((f) => f.body.key));
+  },
   // Books in free float that nothing holds up, per shelf.
   unstable: () => {
     const shelves = new Set(Object.values(free.books).map((p) => p.shelf));
