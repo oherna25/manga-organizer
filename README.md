@@ -27,8 +27,8 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   | 1/4 scale | 42 cm |
 
   In the packed layouts a figure stands at the front edge and the books behind it move to the
-  back of the shelf, or flow around it when there is no room behind. In free float, scroll, press `↑` / `↓`
-  or hold `Shift` and move the pointer while dragging a figure to move it front to back; books in its way are pushed back or moved to
+  back of the shelf, or flow around it when there is no room behind. In free float a figure moves
+  front to back the same way a book does (see below); books in its way are pushed back or moved to
   another gap. A figure needs a shelf tall enough for it, so a 1/4 scale figure needs a shelf
   board moved first, or the top of a bookcase, which has 60 cm of room above it.
 - **Resizes the bookcase.** Open **Bookcase size** to set the height, width, depth (in inches) and
@@ -48,11 +48,23 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   is under it, and books left without support fall into place. Dropped into a full row, a book
   wedges itself in and pushes its neighbours aside. If the row has no room left, it lies flat
   across the tops of the other books instead. The top of each bookcase is a surface too, spanning
-  the whole width of the case. Use **Add bookcase** for more room,
-  **Remove empty** to take out every bookcase with nothing in it, and **Reset places** to go back
-  to single rows. Books can be turned in quarter turns to any of
-  the 24 ways a book can sit square on a shelf, for example cover out or lying on its back. When
-  the bookcase changes size, books that still fit stay where you put them and the rest are moved
+  the whole width of the case. Use **Add bookcase** for more room, **Remove empty** to take out
+  every bookcase with nothing in it, and **Reset places** to go back to single rows.
+
+  A book can go anywhere in the depth of its shelf, from the front edge to the back panel. While
+  dragging, move it front to back in any of three ways:
+
+  - Scroll. Scrolling up pushes it back.
+  - Press `↑` to push it back or `↓` to pull it forward.
+  - Hold `Shift` and move the pointer up or down. The book stays on its shelf, and moving up by
+    about one shelf's height on screen takes it from the front to the back.
+
+  Where there is no room at the depth you ask for, the book shows at the nearest depth where it
+  fits, and full spots never stop it moving further. When both rows of a shelf are full, the
+  nearest fit at the back can be lying flat across the back row.
+
+  Books can be turned in quarter turns to any of the 24 ways a book can sit square on a shelf, for
+  example cover out or lying on its back. When the bookcase changes size, books that still fit stay where you put them and the rest are moved
   to the first free gap.
 
   To move a whole series at once, right-click one of its books and then drag any of them: the
