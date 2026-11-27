@@ -375,7 +375,7 @@ const caseX = (index, cases) => (index - (cases - 1) / 2) * CASE_W;
 // Efficient layout, per shelf:
 //   1. a front row of upright books on the shelf board,
 //   2. a second row behind it, standing on a riser so its spines show over the front row,
-//   3. flat stacks lying on top of the back row, filling the headroom up to the next board.
+//   3. unless turned off, flat stacks lying on top of the back row, filling the headroom up to the next board.
 // Stacks are kept off the front row so the raised back row stays visible.
 //
 // Dense layout: the same two rows, but with no riser and with flat stacks on top of both rows.
@@ -384,7 +384,7 @@ const caseX = (index, cases) => (index - (cases - 1) / 2) * CASE_W;
 // raised book still fits under the board above. A shelf too short for the next book is skipped.
 const LAYOUT_KEY = 'manga-shelf-layout-v1';
 
-function packEfficientShelf(queue, start, shelf, out, risers, dense) {
+function packEfficientShelf(queue, start, shelf, out, risers, { dense, stacks: flat }) {
   let i = start;
   const clear = clearOf(shelf);
   const spans = figureSpans(shelf); // books keep out of the front row where a figure stands
@@ -429,14 +429,14 @@ function packEfficientShelf(queue, start, shelf, out, risers, dense) {
   const front = row(0, BOOK_Z, true, spans);
   if (i >= queue.length) return i;
   if (!TWO_DEEP) {
-    if (dense) stacks(front, 0, BOOK_Z, spans);
+    if (dense && flat) stacks(front, 0, BOOK_Z, spans);
     return i;
   }
   const backFloor = dense ? 0 : riserFor(clear);
   if (backFloor > 0) risers.push({ shelf, height: backFloor });
   const back = row(backFloor, BACK_Z, false, deepSpans);
-  stacks(back, backFloor, BACK_Z, deepSpans);
-  if (dense) stacks(front, 0, BOOK_Z, spans);
+  if (flat) stacks(back, backFloor, BACK_Z, deepSpans);
+  if (dense && flat) stacks(front, 0, BOOK_Z, spans);
   return i;
 }
 
@@ -1011,7 +1011,10 @@ function layoutFor(list, mode) {
       for (let vol = 1; vol <= s.count; vol++) queue.push({ key: `${s.id}:${vol}`, series: s, vol, look });
     }
     let i = 0;
-    while (i < queue.length) i = packEfficientShelf(queue, i, shelf++, slots, risers, mode === 'dense');
+    while (i < queue.length) i = packEfficientShelf(queue, i, shelf++, slots, risers, {
+      dense: mode === 'dense',
+      stacks: mode === 'dense' || efficientStacks,
+    });
     shelf = slots.length ? slots.at(-1).shelf : 0;
   } else {
     let x = 0;
@@ -1452,6 +1455,8 @@ function syncFigures() {
 const books = new Map(); // "seriesId:volume" -> mesh
 let layout = { slots: [], cases: 1, risers: [] };
 const LAYOUT_MODES = ['standard', 'efficient', 'dense', 'free'];
+const STACKS_KEY = 'manga-shelf-stacks-v1';
+let efficientStacks = localStorage.getItem(STACKS_KEY) !== 'off'; // only the Efficient layout reads it
 let seedFrom = 'standard'; // the packed layout free float starts from
 let layoutMode = LAYOUT_MODES.includes(localStorage.getItem(LAYOUT_KEY)) ? localStorage.getItem(LAYOUT_KEY) : 'standard';
 const riserGroup = new THREE.Group();
@@ -2128,7 +2133,8 @@ const layoutButtons = [...document.querySelectorAll('#layout-modes button')];
 const layoutNoteEl = document.getElementById('layout-note');
 const LAYOUT_NOTES = {
   standard: 'One row of upright books per shelf.',
-  efficient: 'Two rows deep, the back row raised on risers so it shows, flat stacks on top of it.',
+  efficient: (stacks) =>
+    `Two rows deep, the back row raised on risers so it shows${stacks ? ', flat stacks on top of it' : ', no books lying on top of each other'}.`,
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
   free: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase, and scroll while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
 };
@@ -2136,6 +2142,15 @@ const freeTools = document.getElementById('free-tools');
 const removeCaseEl = document.getElementById('remove-case');
 const togetherEl = document.getElementById('together');
 const togetherSelect = document.getElementById('together-mode');
+const stacksEl = document.getElementById('stacks');
+const stacksInput = document.getElementById('stacks-on');
+stacksInput.checked = efficientStacks;
+stacksInput.addEventListener('change', () => {
+  efficientStacks = stacksInput.checked;
+  localStorage.setItem(STACKS_KEY, efficientStacks ? 'on' : 'off');
+  syncScene();
+  overview(false);
+});
 togetherSelect.value = keepTogether;
 togetherSelect.addEventListener('change', () => {
   keepTogether = TOGETHER_MODES.includes(togetherSelect.value) ? togetherSelect.value : 'off';
@@ -2156,9 +2171,12 @@ function renderLayoutNote() {
   const picked = layoutMode === 'free' && series.find((s) => s.id === groupId);
   layoutNoteEl.textContent = picked
     ? `Whole series picked: ${picked.title}. Drag any of its books to move all ${picked.count} together. Right-click it again or press Esc to let go.`
-    : LAYOUT_NOTES[layoutMode];
+    : typeof LAYOUT_NOTES[layoutMode] === 'function'
+      ? LAYOUT_NOTES[layoutMode](efficientStacks)
+      : LAYOUT_NOTES[layoutMode];
   freeTools.hidden = layoutMode !== 'free';
   togetherEl.hidden = layoutMode !== 'free';
+  stacksEl.hidden = layoutMode !== 'efficient';
   removeCaseEl.disabled = layout.cases < 2 || !emptyCases().length;
 }
 
