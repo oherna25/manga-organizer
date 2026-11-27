@@ -1643,8 +1643,11 @@ function showTooltip(event) {
 }
 
 // Free float: drag a book to move it. The pointer moves it along the shelf and between shelves,
-// the wheel moves it front to back, and R, T and F turn it a quarter turn at a time.
-let drag = null; // { mesh, slot, offsetX, z, o, event, moved, spot }
+// the wheel, the up and down arrows or Shift plus pointer motion move it front to back, and R, T
+// and F turn it a quarter turn at a time. `wantZ` is the depth asked for and `spot.z` the nearest
+// depth where it can rest; `planeZ` keeps the pointer's drag plane still while depth changes.
+let drag = null; // { mesh, slot, offsetX, wantZ, planeZ, anchor, o, event, moved, spot }
+let shiftHeld = false;
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
 function planeHit(event, z) {
@@ -1671,29 +1674,83 @@ function pickAny(event) {
   return first?.object ?? null;
 }
 
-// Which shelf a point on the drag plane is over, and where that shelf's board starts.
-function shelfAt(hit) {
+// Which shelf a point on the drag plane is over, and where that shelf's board starts. A `fixed`
+// shelf is used as given, whatever the point is over.
+function shelfAt(hit, fixed) {
   const { cases } = layout;
-  const column = clamp(Math.round((hit.x - caseX(0, cases)) / CASE_W), 0, cases - 1);
-  let level = 0; // the highest board the pointer is above
-  for (let k = 1; k < SHELVES; k++) if (hit.y >= BOARD_Y[k]) level = k;
-  const shelf = shelfOf(column, hit.y >= CASE_H ? -1 : SHELVES - 1 - level); // above the case is its top
+  let shelf = fixed;
+  if (shelf === undefined) {
+    const column = clamp(Math.round((hit.x - caseX(0, cases)) / CASE_W), 0, cases - 1);
+    let level = 0; // the highest board the pointer is above
+    for (let k = 1; k < SHELVES; k++) if (hit.y >= BOARD_Y[k]) level = k;
+    shelf = shelfOf(column, hit.y >= CASE_H ? -1 : SHELVES - 1 - level); // above the case is its top
+  }
+  const column = shelf < 0 ? -shelf - 1 : Math.floor(shelf / SHELVES);
   const surf = surface(shelf);
   return { shelf, floorY: surf.floorY, left: caseX(column, cases) - surf.width / 2 };
 }
 
-// Figures: drag one to another spot or shelf, in any layout. In free float the wheel moves it
-// front to back; in the packed layouts it stands at the front edge.
-let figDrag = null; // { group, fig, event, offsetX, z, moved, spot }
+const DEPTH_STEP = 0.05;
+const DEPTH_KEY_STEP = 0.15;
+
+// The first z that `fit` accepts, searching outward from `want` both ways inside `range`.
+function nearestDepth(want, [back, front], fit) {
+  for (let k = 0; want - k * DEPTH_STEP >= back - 1e-9 || want + k * DEPTH_STEP <= front + 1e-9; k++) {
+    for (const z of k === 0 ? [want] : [want - k * DEPTH_STEP, want + k * DEPTH_STEP]) {
+      if (z < back - 1e-9 || z > front + 1e-9) continue;
+      const found = fit(z);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Move what is being dragged (a record with wantZ and anchor) front to back.
+function nudgeDepth(d, dz) {
+  d.wantZ += dz;
+  if (d.anchor) d.anchor.z += dz;
+}
+
+// Holding Shift turns vertical pointer motion into depth: moving up by about one shelf row of
+// screen height covers the whole depth. Returns the shelf the drag is pinned to meanwhile.
+function shiftDepth(d, hit, range) {
+  if (!shiftHeld) {
+    d.anchor = null;
+    return undefined;
+  }
+  const { clientX, clientY } = d.event;
+  if (!d.anchor) {
+    const below = planeHit({ clientX, clientY: clientY + 100 }, d.planeZ);
+    const perPixel = below ? Math.abs(below.y - hit.y) / 100 : 0;
+    const k = (perPixel * (range[1] - range[0])) / (CASE_H / SHELVES);
+    d.anchor = { y: clientY, z: d.wantZ, shelf: shelfAt(hit).shelf, k };
+  }
+  d.wantZ = d.anchor.z + (clientY - d.anchor.y) * d.anchor.k; // back is lower z
+  return d.anchor.shelf;
+}
+
+// Where a book asked to rest at wantZ comes to rest, or null when no depth on the shelf takes it.
+function resolveDepth(shelf, bodies, look, x, wantZ, o) {
+  return nearestDepth(wantZ, zRange(extent(look, o).d), (z) => placeSpot(shelf, bodies, look, x, z, o));
+}
+
+// Figures: drag one to another spot or shelf, in any layout. In free float it moves front to back
+// like a book; in the packed layouts it stands at the front edge.
+let figDrag = null; // { group, fig, event, offsetX, wantZ, planeZ, anchor, moved, spot }
 
 function updateFigDrag() {
-  const hit = planeHit(figDrag.event, figDrag.group.userData.position.z);
-  if (!hit) return false;
-  const { shelf, floorY, left } = shelfAt(hit);
   const { fig } = figDrag;
-  const fit = figureFits(figures, fig.id, fig.size, shelf, hit.x - figDrag.offsetX - left, layoutMode === 'free' ? figDrag.z : Infinity);
+  const hit = planeHit(figDrag.event, figDrag.planeZ);
+  if (!hit) return false;
+  const free = layoutMode === 'free';
+  const range = zRange(FIGURE_SIZES[fig.size].w);
+  const fixed = free ? shiftDepth(figDrag, hit, range) : undefined;
+  const { shelf, floorY, left } = shelfAt(hit, fixed);
+  const x = hit.x - figDrag.offsetX - left;
+  const fits = (z) => figureFits(figures, fig.id, fig.size, shelf, x, z);
+  const fit = free ? nearestDepth(clamp(figDrag.wantZ, range[0], Math.max(...range)), range, fits) : fits(Infinity);
   if (!fit) return false;
-  if (layoutMode === 'free') figDrag.z = fit.z;
+  if (free) figDrag.wantZ = clamp(figDrag.wantZ, range[0], Math.max(...range));
   figDrag.spot = { shelf, x: fit.x, z: fit.z, position: new THREE.Vector3(left + fit.x, floorY, fit.z) };
   return true;
 }
@@ -1756,13 +1813,14 @@ window.addEventListener(
     if (event.button !== 0 || event.target !== canvas || drag || shelfDrag || figDrag) return;
     const mesh = pickAny(event);
     if (!mesh) return;
+    shiftHeld = event.shiftKey;
     if (mesh.userData.figure) {
       const fig = mesh.userData.figure;
       const hit = planeHit(event, mesh.userData.position.z);
       figDrag = {
         group: mesh, fig, event,
         offsetX: hit ? hit.x - mesh.userData.position.x : 0,
-        z: figureZ(fig), moved: false, spot: null,
+        wantZ: figureZ(fig), planeZ: mesh.userData.position.z, anchor: null, moved: false, spot: null,
       };
       hovered = null;
       controls.enabled = false;
@@ -1785,7 +1843,7 @@ window.addEventListener(
     drag = {
       mesh, slot, event,
       offsetX: hit ? hit.x - slot.position.x : 0,
-      z: slot.z, o: slot.o, moved: false, spot: null,
+      wantZ: slot.z, planeZ: slot.z + BOOK_D / 2, anchor: null, o: slot.o, moved: false, spot: null,
     };
     controls.enabled = false;
     canvas.setPointerCapture(event.pointerId);
@@ -1803,14 +1861,16 @@ function startMoving() {
 
 // Work out where the dragged book would rest under the pointer. False when it does not fit there.
 function updateDrag() {
-  const hit = planeHit(drag.event, drag.z + BOOK_D / 2);
+  const hit = planeHit(drag.event, drag.planeZ);
   if (!hit) return false;
-  const { shelf, floorY, left } = shelfAt(hit);
-  const spot = placeSpot(
-    shelf, bodiesIn(free.books, shelf, drag.slot.key), drag.slot.look, hit.x - drag.offsetX - left, drag.z, drag.o,
+  const range = zRange(extent(drag.slot.look, drag.o).d);
+  const fixed = shiftDepth(drag, hit, range);
+  drag.wantZ = clamp(drag.wantZ, range[0], Math.max(...range));
+  const { shelf, floorY, left } = shelfAt(hit, fixed);
+  const spot = resolveDepth(
+    shelf, bodiesIn(free.books, shelf, drag.slot.key), drag.slot.look, hit.x - drag.offsetX - left, drag.wantZ, drag.o,
   );
   if (!spot) return false;
-  drag.z = spot.z;
   drag.spot = { ...spot, shelf, position: new THREE.Vector3(left + spot.x, floorY + spot.y, spot.z) };
   return true;
 }
@@ -1915,17 +1975,15 @@ canvas.addEventListener(
       event.preventDefault();
       if (layoutMode !== 'free') return; // figures stand at the front edge in the packed layouts
       figDrag.moved = true;
-      const z = figDrag.z;
-      figDrag.z = z + event.deltaY * 0.002;
-      if (!updateFigDrag()) figDrag.z = z;
+      nudgeDepth(figDrag, event.deltaY * 0.002);
+      updateFigDrag();
       return;
     }
     if (!drag) return;
     event.preventDefault();
     if (!drag.moved) startMoving();
-    const z = drag.z;
-    drag.z = z + event.deltaY * 0.002; // scroll up pushes the book back; dropSpot keeps it on the shelf
-    if (!updateDrag()) drag.z = z;
+    nudgeDepth(drag, event.deltaY * 0.002); // scroll up pushes the book back
+    updateDrag();
   },
   { passive: false },
 );
@@ -1942,6 +2000,7 @@ canvas.addEventListener('pointermove', (event) => {
   }
   if (figDrag) {
     figDrag.event = event;
+    shiftHeld = event.shiftKey;
     if (!figDrag.moved && downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) {
       figDrag.moved = true;
       tooltip.hidden = true;
@@ -1952,6 +2011,7 @@ canvas.addEventListener('pointermove', (event) => {
   }
   if (drag) {
     drag.event = event;
+    shiftHeld = event.shiftKey;
     if (!drag.moved && downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) startMoving();
     if (drag.moved) updateDrag();
     return;
@@ -2137,7 +2197,7 @@ const LAYOUT_NOTES = {
   efficient: (stacks) =>
     `Two rows deep, the back row raised on risers so it shows${stacks ? ', flat stacks on top of it' : ', no books lying on top of each other'}.`,
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
-  free: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase, and scroll while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
+  free: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase, and scroll, press ↑ / ↓ or hold Shift and move the pointer while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
 };
 const freeTools = document.getElementById('free-tools');
 const removeCaseEl = document.getElementById('remove-case');
@@ -2405,7 +2465,23 @@ importFile.addEventListener('change', async () => {
   }
 });
 
+// Arrow up pushes the dragged thing back and arrow down pulls it forward. True when it was one.
+function depthKey(event, d) {
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return false;
+  event.preventDefault();
+  nudgeDepth(d, event.key === 'ArrowUp' ? -DEPTH_KEY_STEP : DEPTH_KEY_STEP);
+  return true;
+}
+
+window.addEventListener('keyup', (event) => {
+  if (event.key !== 'Shift') return;
+  shiftHeld = false;
+  if (figDrag?.moved && layoutMode === 'free') updateFigDrag();
+  else if (drag?.moved) updateDrag();
+});
+
 window.addEventListener('keydown', (event) => {
+  if (event.key === 'Shift') shiftHeld = true;
   if (event.metaKey || event.ctrlKey || event.altKey) return; // leave browser shortcuts alone
   if (event.target.closest('input, textarea')) return;
   // Quarter turns in free float: R rolls the book, T turns it to face another way, F tips it over.
@@ -2416,10 +2492,18 @@ window.addEventListener('keydown', (event) => {
   }
   if (figDrag) {
     if (event.key === 'Escape') endFigDrag(); // put the figure back where it was
+    else if (layoutMode === 'free') {
+      if (depthKey(event, figDrag)) figDrag.moved = true;
+      if (figDrag.moved && (event.key === 'Shift' || event.key.startsWith('Arrow'))) updateFigDrag();
+    }
     return;
   }
   if (drag) {
     if (event.key === 'Escape') endDrag(); // put the book back where it was
+    else if (depthKey(event, drag)) {
+      if (!drag.moved) startMoving();
+      updateDrag();
+    } else if (event.key === 'Shift' && drag.moved) updateDrag();
     if (axis !== undefined) {
       if (!drag.moved) startMoving();
       const before = drag.o;
@@ -2571,6 +2655,11 @@ window.__shelf = {
   // Where book `key` would rest if dropped at x, z on a shelf (null when it does not fit). With
   // `drag`, the way a drag resolves it: magnet, wedging between neighbours, lying across the tops.
   // A negative shelf is the top of a bookcase.
+  // The spot a drag asking for depth `wantZ` resolves to: the nearest depth where the book fits.
+  resolveDepth: (key, shelf, x, wantZ, o = 0) => {
+    const look = lookById.get(seriesIdOf(key));
+    return look ? resolveDepth(shelf, bodiesIn(free.books, shelf, key), look, x, wantZ, o) : null;
+  },
   dropSpot: (key, shelf, x, z, o = 0, drag = false) => {
     const bodies = bodiesIn(free.books, shelf, key);
     const look = lookById.get(seriesIdOf(key));
