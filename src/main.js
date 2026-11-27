@@ -2406,6 +2406,7 @@ const LAYOUT_NOTES = {
     `Two rows deep, the back row raised on risers so it shows${stacks ? ', flat stacks on top of it' : ', no books lying on top of each other'}.`,
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
   free: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase, and scroll, press ↑ / ↓ or hold Shift and move the pointer while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
+  freeTouch: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase. Tap one for buttons that turn it, stand it back up or push it back and pull it forward, and Move whole series to pick its whole series. An upright book with nothing to lean on falls over.',
 };
 const freeTools = document.getElementById('free-tools');
 const removeCaseEl = document.getElementById('remove-case');
@@ -2438,11 +2439,14 @@ function renderLayoutNote() {
     button.querySelector('small').textContent = `${cases} bookcase${cases === 1 ? '' : 's'}`;
   }
   const picked = layoutMode === 'free' && series.find((s) => s.id === groupId);
+  const touch = lastPointer === 'touch';
+  const note = LAYOUT_NOTES[touch && layoutMode === 'free' ? 'freeTouch' : layoutMode];
+  const letGo = touch ? 'Tap Move whole series again or Done to let go.' : 'Right-click it again or press Esc to let go.';
   layoutNoteEl.textContent = picked
-    ? `Whole series picked: ${picked.title}. Drag any of its books to move all ${picked.count} together. Right-click it again or press Esc to let go.`
-    : typeof LAYOUT_NOTES[layoutMode] === 'function'
-      ? LAYOUT_NOTES[layoutMode](efficientStacks)
-      : LAYOUT_NOTES[layoutMode];
+    ? `Whole series picked: ${picked.title}. Drag any of its books to move all ${picked.count} together. ${letGo}`
+    : typeof note === 'function'
+      ? note(efficientStacks)
+      : note;
   freeTools.hidden = layoutMode !== 'free';
   togetherEl.hidden = layoutMode !== 'free';
   stacksEl.hidden = layoutMode !== 'efficient';
