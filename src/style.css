@@ -396,6 +396,18 @@ kbd {
   display: none;
 }
 
+#stacks {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b9ad9c;
+  font-size: 12px;
+}
+
+#stacks[hidden] {
+  display: none;
+}
+
 #together select {
   color: #f1ebe2;
 }

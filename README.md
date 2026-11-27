@@ -40,7 +40,7 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   | Layout | How books are placed |
   | --- | --- |
   | Single rows | One row of upright books per shelf |
-  | Efficient | Two rows deep, the back row raised on risers so it stays visible, flat stacks on top of it |
+  | Efficient | Two rows deep, the back row raised on risers so it stays visible, flat stacks on top of it unless you untick **Stack books flat on top** |
   | Dense | Two rows deep with flat stacks on top of both rows; holds the most, but hides the back row |
   | Free float | Wherever you drag them: any shelf or the top of any bookcase, any spot along it, front to back, turned any way up |
 
