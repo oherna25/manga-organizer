@@ -2,18 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Manga Shelf</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <canvas id="scene"></canvas>
 
-    <aside id="panel">
+    <aside id="panel" data-sheet="peek">
+      <button type="button" id="sheet-handle" aria-label="Show or hide the panel" aria-expanded="false"></button>
       <header>
         <h1>Manga Shelf</h1>
         <p id="totals"></p>
       </header>
+
+      <div id="peek">
+        <div id="peek-series" hidden>
+          <span class="title"></span>
+          <button type="button" data-act="dec" aria-label="Remove a volume">−</button>
+          <span class="count"></span>
+          <button type="button" data-act="inc" aria-label="Add a volume">+</button>
+        </div>
+        <p id="sheet-hint">Drag to orbit · pinch to zoom · tap a book to see its cover</p>
+      </div>
 
       <form id="add-form" autocomplete="off">
         <input id="add-title" placeholder="Title" required />

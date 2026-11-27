@@ -2127,6 +2127,18 @@ const listEl = document.getElementById('list');
 const totalsEl = document.getElementById('totals');
 const searchEl = document.getElementById('search');
 const undoEl = document.getElementById('undo');
+const peekSeriesEl = document.getElementById('peek-series');
+const sheetHintEl = document.getElementById('sheet-hint');
+const sheetHandleEl = document.getElementById('sheet-handle');
+
+// On a narrow screen the panel is a bottom sheet, peeking or open. Elsewhere the CSS ignores this.
+function setSheet(state) {
+  panel.dataset.sheet = state;
+  sheetHandleEl.setAttribute('aria-expanded', String(state === 'open'));
+}
+const toggleSheet = () => setSheet(panel.dataset.sheet === 'open' ? 'peek' : 'open');
+sheetHandleEl.addEventListener('click', toggleSheet);
+panel.querySelector('header').addEventListener('click', toggleSheet);
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -2140,6 +2152,15 @@ function renderList() {
   totalsEl.textContent = `${series.length} series · ${volumes} volumes` +
     (figures.length ? ` · ${figures.length} figure${figures.length === 1 ? '' : 's'}` : '');
   undoEl.disabled = undoStack.length === 0;
+
+  const picked = series.find((s) => s.id === selectedId);
+  peekSeriesEl.hidden = !picked;
+  sheetHintEl.hidden = !!picked;
+  if (picked) {
+    peekSeriesEl.querySelector('.title').textContent = picked.title;
+    peekSeriesEl.querySelector('.count').textContent = String(picked.count);
+    peekSeriesEl.querySelector('[data-act="dec"]').disabled = picked.count <= 1;
+  }
 
   const query = searchEl.value.trim().toLowerCase();
   const shown = series.filter((s) => !query || `${s.title} ${s.author}`.toLowerCase().includes(query));
@@ -2197,7 +2218,15 @@ listEl.addEventListener('click', (event) => {
   if (act === 'inc') changeCount(id, 1);
   else if (act === 'dec') changeCount(id, -1);
   else if (act === 'del') commit(series.filter((s) => s.id !== id));
-  else select(id, { focus: true });
+  else {
+    setSheet('peek'); // first, so the camera fits the series into the shelf left showing
+    select(id, { focus: true });
+  }
+});
+
+peekSeriesEl.addEventListener('click', (event) => {
+  const act = event.target.closest('button')?.dataset.act;
+  if (selectedId && act) changeCount(selectedId, act === 'inc' ? 1 : -1);
 });
 
 searchEl.addEventListener('input', renderList);
