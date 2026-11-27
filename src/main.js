@@ -1547,7 +1547,11 @@ function syncScene() {
 // ---------------------------------------------------------------------------
 
 let cameraGoal = null; // { position, target } while flying somewhere
-controls.addEventListener('start', () => (cameraGoal = null));
+let overviewShown = false; // the last camera move framed every bookcase
+controls.addEventListener('start', () => {
+  cameraGoal = null;
+  overviewShown = false;
+});
 
 // The part of the window the panel leaves uncovered: the right of it when it is a side panel, the
 // top when it is a bottom sheet. Whichever leaves more room is the one the panel is not covering.
@@ -1571,25 +1575,35 @@ function distanceToFit(width, height) {
 
 function flyTo(center, width, height, minDistance = 10) {
   const distance = Math.max(minDistance, distanceToFit(width, height));
+  overviewShown = false;
   cameraGoal = {
     target: center.clone(),
     position: center.clone().add(new THREE.Vector3(0, distance * 0.06, distance)),
   };
 }
 
-function overview(instant) {
+function overviewHeight() {
   const tall = [
     ...layout.slots.filter((slot) => slot.shelf < 0).map((slot) => slot.y + slot.h / 2),
     ...figures.filter((f) => f.shelf < 0).map((f) => FIGURE_SIZES[f.size].h),
   ];
-  const height = CASE_H + (tall.length ? Math.max(...tall) + 0.4 : 0); // keep what stands on top in view
-  // A tall phone screen needs to stand further back to fit every bookcase, so the zoom limit and
-  // the fog move back with it.
+  return CASE_H + (tall.length ? Math.max(...tall) + 0.4 : 0); // keep what stands on top in view
+}
+
+// A tall phone screen needs to stand further back to fit every bookcase, so the zoom limit and
+// the fog move back with it.
+function updateReach(height) {
   const reach = distanceToFit(layout.cases * CASE_W, height);
   controls.maxDistance = Math.max(90, reach * 1.05);
-  scene.fog.near = Math.max(60, reach - 30);
-  scene.fog.far = Math.max(140, reach + 50);
+  scene.fog.near = Math.max(60, reach + 12);
+  scene.fog.far = Math.max(140, reach + 92);
+}
+
+function overview(instant) {
+  const height = overviewHeight();
+  updateReach(height);
   flyTo(new THREE.Vector3(0, height / 2, 0), layout.cases * CASE_W, height);
+  overviewShown = true;
   if (instant) {
     camera.position.copy(cameraGoal.position);
     controls.target.copy(cameraGoal.target);
@@ -1621,6 +1635,7 @@ function resize() {
   const free = freeRect();
   camera.setViewOffset(w, h, w / 2 - (free.x + free.w / 2), h / 2 - (free.y + free.h / 2), w, h);
   camera.updateProjectionMatrix();
+  updateReach(overviewHeight());
   actionsEl.style.left = `${free.x + free.w / 2}px`;
   actionsEl.style.bottom = `max(${h - (free.y + free.h) + 12}px, calc(12px + env(safe-area-inset-bottom)))`;
   actionsEl.style.maxWidth = `${free.w - 24}px`;
@@ -2307,8 +2322,10 @@ const sheetHandleEl = document.getElementById('sheet-handle');
 // On a narrow screen the panel is a bottom sheet, peeking or open. Elsewhere the CSS ignores this.
 const sheetQuery = matchMedia('(max-width: 720px) and (min-height: 501px), (max-width: 720px) and (orientation: portrait)');
 function setSheet(state) {
+  const changed = panel.dataset.sheet !== state;
   panel.dataset.sheet = state;
   sheetHandleEl.setAttribute('aria-expanded', String(state === 'open'));
+  if (changed && overviewShown) overview(false); // refit the shelves to the room the sheet leaves
 }
 const toggleSheet = () => {
   if (sheetQuery.matches) setSheet(panel.dataset.sheet === 'open' ? 'peek' : 'open');
