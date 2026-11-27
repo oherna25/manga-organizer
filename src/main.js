@@ -1623,6 +1623,21 @@ new ResizeObserver(resize).observe(panel);
 // Picking: hover pulls a book out, click selects its series
 // ---------------------------------------------------------------------------
 
+// The kind of pointer used last, so help text and controls match the hand on the device.
+let lastPointer = matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse';
+document.documentElement.dataset.input = lastPointer;
+window.addEventListener(
+  'pointerdown',
+  (event) => {
+    const kind = event.pointerType === 'touch' ? 'touch' : 'mouse';
+    if (kind === lastPointer) return;
+    lastPointer = kind;
+    document.documentElement.dataset.input = kind;
+    renderLayoutNote();
+  },
+  true,
+);
+
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const tooltip = document.getElementById('tooltip');
