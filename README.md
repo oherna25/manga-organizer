@@ -152,6 +152,15 @@ The collection starts from `src/collection.json`, a list of series:
 Edits you make in the app are saved in your browser, not in that file. So are free float
 positions, figures and the bookcase size, which **Export** does not include. **Export** downloads the current collection as JSON, **Import** loads one, and **Reset** goes back to `src/collection.json`.
 
+**Import a list** in the side panel adds series from your AniList or MyAnimeList manga list. For
+AniList, type your username. For MyAnimeList, go to
+[myanimelist.net/panel.php?go=export](https://myanimelist.net/panel.php?go=export), choose Manga,
+and give the downloaded `.xml` or `.xml.gz` file to **Import MyAnimeList export**. Each series gets
+the volumes you have read, or all of its volumes if it is completed and none are recorded, or one
+volume otherwise. Plan to read entries and light novels are skipped. The import merges into your collection: it
+never removes a series or lowers a count, importing the same list again changes nothing, and
+**Undo** reverses a whole import.
+
 To build `src/collection.json` from a spreadsheet with `title`, `author` and `number of books`
 columns (needs Python 3):
 
@@ -176,6 +185,10 @@ That writes `src/covers.json`. If a series gets the wrong cover, or none, edit
 - Cover art comes from [AniList](https://anilist.co) and is loaded from there when the app runs, so
   covers need an internet connection. Adding a series in the app sends its title to AniList to find
   a cover.
+- Importing from AniList sends your username to AniList. A MyAnimeList import sends the MyAnimeList
+  ids in your export to AniList to find authors and covers, and the export file itself stays in your
+  browser. After an import, up to 20 series that still have no cover get their titles sent to
+  AniList to find one, the same as adding a series.
 - AniList has one cover per series, so every volume of a series shows the same cover.
 - Spines are generated from the cover's colour and art. They are not scans of the printed spines.
 - The bookcase starts as the Room Essentials 5 Shelf Bookcase (71.18 × 24.49 × 11.57 in) with

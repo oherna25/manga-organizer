@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import seed from './collection.json';
 import seedCovers from './covers.json';
+import { fetchAniList, parseMalExport, mergeImport } from './list-import.js';
 
 // ---------------------------------------------------------------------------
 // Collection state (persisted in localStorage, seeded from the spreadsheet)
@@ -2463,6 +2464,84 @@ importFile.addEventListener('change', async () => {
   } catch (err) {
     alert(`Could not import ${file.name}: ${err.message}`);
   }
+});
+
+const listImportEl = document.getElementById('list-import');
+const listNoteEl = document.getElementById('list-import-note');
+const listFormEl = document.getElementById('list-import-form');
+const listUserEl = document.getElementById('list-import-user');
+const malFileEl = document.getElementById('mal-file');
+const listButtons = [...listImportEl.querySelectorAll('button')];
+const MAX_COVER_LOOKUPS = 20;
+
+// A search guess can be a different series (Kaiju No. 8 finds its spin-off), so only curated
+// covers and list-import covers may fold entries together.
+const exactCoverId = (s) => {
+  const k = titleKey(s.title);
+  return seedCovers[k]?.id ?? (lookedUp[k]?.exact ? lookedUp[k].id : undefined);
+};
+
+async function importList(source, load) {
+  listButtons.forEach((b) => (b.disabled = true));
+  listNoteEl.textContent = 'Loading…';
+  try {
+    const entries = await load();
+    if (!entries.length) {
+      listNoteEl.textContent = `No series to import from that ${source} list. Plan to read entries and light novels are skipped.`;
+      return;
+    }
+    const { next, covers, added, updated } = mergeImport(series, entries, {
+      titleKey,
+      coverId: exactCoverId,
+      newId,
+      maxCount: MAX_COUNT,
+    });
+    // The list already carries covers, so asking AniList about each title again would only
+    // run into its rate limit.
+    let coversWritten = false;
+    for (const { title, cover } of covers) {
+      const k = titleKey(title);
+      if (seedCovers[k] || lookedUp[k]?.exact) continue;
+      lookedUp[k] = { ...cover, exact: true };
+      coversWritten = true;
+    }
+    if (coversWritten) localStorage.setItem(COVER_CACHE_KEY, JSON.stringify(lookedUp));
+    if (!added && !updated) {
+      if (coversWritten) {
+        renderList();
+        syncScene();
+      }
+      listNoteEl.textContent = `Nothing new: everything in your ${source} list is already in the collection.`;
+      return;
+    }
+    const known = new Set(series.map((s) => s.id));
+    commit(next);
+    overview(false);
+    const bare = next.filter((s) => !known.has(s.id) && !coverOf(s));
+    if (bare.length <= MAX_COVER_LOOKUPS) {
+      (async () => {
+        for (const s of bare) await lookupCover(s.title);
+      })();
+    }
+    listNoteEl.textContent = `Added ${added} series and updated ${updated} from ${source}. Plan to read entries and light novels were skipped.`;
+  } catch (err) {
+    listNoteEl.textContent = err.message || 'Import failed.';
+  } finally {
+    listButtons.forEach((b) => (b.disabled = false));
+  }
+}
+
+listFormEl.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const name = listUserEl.value.trim();
+  if (name) importList('AniList', () => fetchAniList(name));
+});
+
+document.getElementById('mal-import').addEventListener('click', () => malFileEl.click());
+malFileEl.addEventListener('change', () => {
+  const file = malFileEl.files[0];
+  malFileEl.value = '';
+  if (file) importList('MyAnimeList', () => parseMalExport(file));
 });
 
 // Arrow up pushes the dragged thing back and arrow down pulls it forward. True when it was one.

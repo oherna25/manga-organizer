@@ -254,7 +254,8 @@ kbd {
 }
 
 #figures summary,
-#case-size summary {
+#case-size summary,
+#list-import summary {
   cursor: pointer;
   font-weight: 600;
 }
@@ -308,7 +309,8 @@ kbd {
   font-weight: 400;
 }
 
-#figure-form {
+#figure-form,
+#list-import-form {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 6px;
@@ -324,13 +326,15 @@ kbd {
   background: #2a2520;
 }
 
-#figure-form button {
+#figure-form button,
+#list-import-form button {
   background: #c9772a;
   border-color: #c9772a;
   font-weight: 600;
 }
 
-#figure-note {
+#figure-note,
+#list-import-note {
   margin: 6px 0 0;
   color: #9c9183;
   font-size: 12px;
@@ -410,4 +414,15 @@ kbd {
 
 #together select {
   color: #f1ebe2;
+}
+
+#list-import > button {
+  width: 100%;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+#list-import-user,
+#list-import-form button {
+  grid-column: 1 / -1;
 }
