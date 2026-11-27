@@ -69,6 +69,12 @@ button {
   cursor: pointer;
 }
 
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.16);
+  }
+}
+
 button:disabled {
   opacity: 0.35;
   cursor: default;
@@ -90,6 +96,12 @@ button:disabled {
   font-weight: 600;
 }
 
+@media (hover: hover) {
+  #add-form button:hover {
+    background: #dd8a3b;
+  }
+}
+
 #list {
   flex: 1;
   margin: 0;
@@ -107,6 +119,12 @@ button:disabled {
   padding: 6px;
   border-radius: 8px;
   cursor: pointer;
+}
+
+@media (hover: hover) {
+  #list li:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
 }
 
 #list li.selected {
@@ -392,6 +410,12 @@ kbd {
   cursor: pointer;
 }
 
+@media (hover: hover) {
+  #figure-list li:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
 #figure-list .dot {
   width: 12px;
   height: 12px;
@@ -495,21 +519,6 @@ kbd {
   margin: 0;
   color: #9c9183;
   font-size: 12px;
-}
-
-@media (hover: hover) {
-  button:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.16);
-  }
-
-  #add-form button:hover {
-    background: #dd8a3b;
-  }
-
-  #list li:hover,
-  #figure-list li:hover {
-    background: rgba(255, 255, 255, 0.06);
-  }
 }
 
 /* Phones held upright: the panel is a sheet docked at the bottom, peeking or open. */

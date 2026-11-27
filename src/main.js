@@ -2604,6 +2604,7 @@ figureForm.addEventListener('submit', (event) => {
   const id = newId();
   setFigures([...figures, { id, name: figureNameEl.value.trim().replace(/\s+/g, ' ').slice(0, 80), size, ...spot }]);
   figureNameEl.value = '';
+  setSheet('peek');
   focusFigure(id);
 });
 
@@ -2613,7 +2614,10 @@ figureListEl.addEventListener('click', (event) => {
   if (event.target.closest('button')) {
     figureNotice = '';
     setFigures(figures.filter((f) => f.id !== id));
-  } else focusFigure(id);
+  } else {
+    setSheet('peek');
+    focusFigure(id);
+  }
 });
 
 document.getElementById('add-form').addEventListener('submit', (event) => {
