@@ -375,7 +375,8 @@ const caseX = (index, cases) => (index - (cases - 1) / 2) * CASE_W;
 // Efficient layout, per shelf:
 //   1. a front row of upright books on the shelf board,
 //   2. a second row behind it, standing on a riser so its spines show over the front row,
-//   3. unless turned off, flat stacks lying on top of the back row, filling the headroom up to the next board.
+//   3. flat stacks lying on top of the back row, filling the headroom up to the next board, unless
+//      the Stack books flat on top setting is off.
 // Stacks are kept off the front row so the raised back row stays visible.
 //
 // Dense layout: the same two rows, but with no riser and with flat stacks on top of both rows.
@@ -429,14 +430,14 @@ function packEfficientShelf(queue, start, shelf, out, risers, { dense, stacks: f
   const front = row(0, BOOK_Z, true, spans);
   if (i >= queue.length) return i;
   if (!TWO_DEEP) {
-    if (dense && flat) stacks(front, 0, BOOK_Z, spans);
+    if (dense) stacks(front, 0, BOOK_Z, spans);
     return i;
   }
   const backFloor = dense ? 0 : riserFor(clear);
   if (backFloor > 0) risers.push({ shelf, height: backFloor });
   const back = row(backFloor, BACK_Z, false, deepSpans);
   if (flat) stacks(back, backFloor, BACK_Z, deepSpans);
-  if (dense && flat) stacks(front, 0, BOOK_Z, spans);
+  if (dense) stacks(front, 0, BOOK_Z, spans);
   return i;
 }
 
