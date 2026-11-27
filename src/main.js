@@ -1647,13 +1647,16 @@ new ResizeObserver(resize).observe(panel);
 // Picking: hover pulls a book out, click selects its series
 // ---------------------------------------------------------------------------
 
+// Fingers and pens get the touch controls, only a mouse gets hover and the keyboard hints.
+const isTouchLike = (event) => event.pointerType !== 'mouse';
+
 // The kind of pointer used last, so help text and controls match the hand on the device.
 let lastPointer = matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse';
 document.documentElement.dataset.input = lastPointer;
 window.addEventListener(
   'pointerdown',
   (event) => {
-    const kind = event.pointerType === 'touch' ? 'touch' : 'mouse';
+    const kind = isTouchLike(event) ? 'touch' : 'mouse';
     if (kind === lastPointer) return;
     lastPointer = kind;
     document.documentElement.dataset.input = kind;
@@ -1709,7 +1712,7 @@ function planeHit(event, z) {
 }
 
 // Shelf boards: drag one up or down, in any layout. Every bookcase shares the same spacing.
-let shelfDrag = null; // { k, grabY, base, y, moved, pointerId, event }
+let shelfDrag = null; // { k, grabY, base, y, moved, far, pointerId, event }; far is a screen distance, moved a height change
 
 // The book, figure or movable board under the pointer, whichever is in front.
 function pickAny(event) {
@@ -1868,7 +1871,7 @@ function ownPointer(event) {
 let replaying = false;
 function cancelGrabForGesture() {
   const grab = drag || figDrag || shelfDrag;
-  if (!grab || grab.moved) return;
+  if (!grab || (grab === shelfDrag ? grab.far : grab.moved)) return;
   const { event } = grab;
   if (drag) endDrag();
   if (figDrag) endFigDrag();
@@ -1916,7 +1919,7 @@ window.addEventListener(
       const hit = planeHit(event, CASE_D / 2);
       if (!hit) return;
       const k = mesh.userData.board;
-      shelfDrag = { k, grabY: hit.y, base: BOARD_Y[k], y: BOARD_Y[k], moved: false, pointerId: event.pointerId, event };
+      shelfDrag = { k, grabY: hit.y, base: BOARD_Y[k], y: BOARD_Y[k], moved: false, far: false, pointerId: event.pointerId, event };
       hovered = null;
       controls.enabled = false;
       canvas.setPointerCapture(event.pointerId);
@@ -2182,6 +2185,7 @@ canvas.addEventListener('pointermove', (event) => {
   if (!ownPointer(event)) return;
   if (shelfDrag) {
     shelfDrag.event = event;
+    if (downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) shelfDrag.far = true;
     updateShelfDrag(event);
     return;
   }
@@ -2237,7 +2241,7 @@ canvas.addEventListener('pointerup', (event) => {
     endFigDrag();
     if (moved) {
       if (spot) setFigures(figures.map((f) => (f.id === fig.id ? { ...f, shelf: spot.shelf, x: spot.x, z: spot.z } : f)));
-      if (event.pointerType === 'touch') setTarget({ kind: 'figure', id: fig.id });
+      if (isTouchLike(event)) setTarget({ kind: 'figure', id: fig.id });
       return;
     }
   }
@@ -2246,12 +2250,12 @@ canvas.addEventListener('pointerup', (event) => {
     endDrag();
     if (moved) {
       if (spot) dropBook(slot, spot);
-      if (event.pointerType === 'touch') setTarget({ kind: 'book', key: slot.key });
+      if (isTouchLike(event)) setTarget({ kind: 'book', key: slot.key });
       return;
     }
   }
   if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) return; // it was a drag
-  const touch = event.pointerType === 'touch';
+  const touch = isTouchLike(event);
   const hit = pickAny(event);
   const mesh = hit?.userData.slot ? hit : null;
   clearTimeout(clickTimer);
@@ -2267,6 +2271,9 @@ canvas.addEventListener('pointerup', (event) => {
   }
   if (event.button !== 0) return;
   if (touch && hit?.userData.figure) {
+    inspectedKey = null;
+    groupId = null;
+    renderLayoutNote();
     setTarget({ kind: 'figure', id: hit.userData.figure.id });
     return;
   }
