@@ -1583,6 +1583,12 @@ function overview(instant) {
     ...figures.filter((f) => f.shelf < 0).map((f) => FIGURE_SIZES[f.size].h),
   ];
   const height = CASE_H + (tall.length ? Math.max(...tall) + 0.4 : 0); // keep what stands on top in view
+  // A tall phone screen needs to stand further back to fit every bookcase, so the zoom limit and
+  // the fog move back with it.
+  const reach = distanceToFit(layout.cases * CASE_W, height);
+  controls.maxDistance = Math.max(90, reach * 1.05);
+  scene.fog.near = Math.max(60, reach - 30);
+  scene.fog.far = Math.max(140, reach + 50);
   flyTo(new THREE.Vector3(0, height / 2, 0), layout.cases * CASE_W, height);
   if (instant) {
     camera.position.copy(cameraGoal.position);
