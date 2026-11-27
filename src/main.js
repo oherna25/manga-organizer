@@ -1549,14 +1549,24 @@ function syncScene() {
 let cameraGoal = null; // { position, target } while flying somewhere
 controls.addEventListener('start', () => (cameraGoal = null));
 
-function usableAspect() {
-  const inset = panel.getBoundingClientRect().right;
-  return Math.max(0.3, (window.innerWidth - inset) / window.innerHeight);
+// The part of the window the panel leaves uncovered: the right of it when it is a side panel, the
+// top when it is a bottom sheet. Whichever leaves more room is the one the panel is not covering.
+function freeRect() {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const { right, top } = panel.getBoundingClientRect();
+  const beside = { x: right, y: 0, w: W - right, h: H };
+  const above = { x: 0, y: 0, w: W, h: top };
+  const rect = beside.w * beside.h >= above.w * above.h ? beside : above;
+  return { ...rect, w: Math.max(1, rect.w), h: Math.max(1, rect.h) };
 }
 
+// The field of view spans the whole window, so fitting into a smaller rect needs more distance.
 function distanceToFit(width, height) {
   const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  return Math.max(height / 2 / tan, width / 2 / tan / usableAspect()) * 1.12;
+  const { w, h } = freeRect();
+  const H = window.innerHeight;
+  return (Math.max((height * H) / h, (width * H) / w) / 2 / tan) * 1.12;
 }
 
 function flyTo(center, width, height, minDistance = 10) {
@@ -1601,12 +1611,13 @@ function resize() {
   const h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  // Shift the view so the scene is centred in the area not covered by the side panel.
-  const inset = panel.getBoundingClientRect().right;
-  camera.setViewOffset(w, h, -inset / 2, 0, w, h);
+  // Shift the view so the scene is centred in the area the panel leaves uncovered.
+  const free = freeRect();
+  camera.setViewOffset(w, h, w / 2 - (free.x + free.w / 2), h / 2 - (free.y + free.h / 2), w, h);
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(panel);
 
 // ---------------------------------------------------------------------------
 // Picking: hover pulls a book out, click selects its series
