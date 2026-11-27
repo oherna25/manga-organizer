@@ -1622,7 +1622,7 @@ function resize() {
   camera.setViewOffset(w, h, w / 2 - (free.x + free.w / 2), h / 2 - (free.y + free.h / 2), w, h);
   camera.updateProjectionMatrix();
   actionsEl.style.left = `${free.x + free.w / 2}px`;
-  actionsEl.style.bottom = `${h - (free.y + free.h) + 12}px`;
+  actionsEl.style.bottom = `max(${h - (free.y + free.h) + 12}px, calc(12px + env(safe-area-inset-bottom)))`;
   actionsEl.style.maxWidth = `${free.w - 24}px`;
 }
 window.addEventListener('resize', resize);
@@ -2305,11 +2305,17 @@ const sheetHintEl = document.getElementById('sheet-hint');
 const sheetHandleEl = document.getElementById('sheet-handle');
 
 // On a narrow screen the panel is a bottom sheet, peeking or open. Elsewhere the CSS ignores this.
+const sheetQuery = matchMedia('(max-width: 720px) and (min-height: 501px), (max-width: 720px) and (orientation: portrait)');
 function setSheet(state) {
   panel.dataset.sheet = state;
   sheetHandleEl.setAttribute('aria-expanded', String(state === 'open'));
 }
-const toggleSheet = () => setSheet(panel.dataset.sheet === 'open' ? 'peek' : 'open');
+const toggleSheet = () => {
+  if (sheetQuery.matches) setSheet(panel.dataset.sheet === 'open' ? 'peek' : 'open');
+};
+sheetQuery.addEventListener('change', () => {
+  if (sheetQuery.matches) setSheet('peek');
+});
 sheetHandleEl.addEventListener('click', toggleSheet);
 panel.querySelector('header').addEventListener('click', toggleSheet);
 

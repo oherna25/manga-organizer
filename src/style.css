@@ -522,7 +522,7 @@ kbd {
 }
 
 /* Phones held upright: the panel is a sheet docked at the bottom, peeking or open. */
-@media (max-width: 720px) {
+@media (max-width: 720px) and (min-height: 501px), (max-width: 720px) and (orientation: portrait) {
   #panel {
     top: auto;
     left: 0;
@@ -595,10 +595,10 @@ kbd {
 }
 
 /* Phones held sideways: a narrower side panel that scrolls as a whole. */
-@media (max-height: 500px) and (min-width: 721px) {
+@media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
   #panel {
-    top: 8px;
-    bottom: 8px;
+    top: max(8px, env(safe-area-inset-top));
+    bottom: max(8px, env(safe-area-inset-bottom));
     left: max(8px, env(safe-area-inset-left));
     width: 280px;
     overflow-y: auto;
