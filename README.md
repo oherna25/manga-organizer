@@ -12,7 +12,8 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   series, or the form at the top to add a new one. Undo reverses any change.
 - **Shows the cover.** Click a book and it slides out and turns to face you.
 - **Finds a series.** Search by title or author, then click the row and the camera flies to it.
-- **Displays figures.** Open **Figures** to add one by name and size, then drag it to any shelf.
+- **Displays figures.** Open **Figures** to add one by name and size, then drag it to any shelf
+  or onto the top of a bookcase.
   Figures stand in front of the books: a book can sit behind a figure, never in front of one.
 
   | Size | Height |
@@ -29,7 +30,7 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   back of the shelf, or flow around it when there is no room behind. In free float, scroll while
   dragging a figure to move it front to back; books in its way are pushed back or moved to
   another gap. A figure needs a shelf tall enough for it, so a 1/4 scale figure needs a shelf
-  board moved first.
+  board moved first, or the top of a bookcase, which has 60 cm of room above it.
 - **Resizes the bookcase.** Open **Bookcase size** to set the height, width, depth (in inches) and
   the number of shelves, and drag any shelf board up or down in the scene. Every layout repacks
   to fit, and Undo reverses it.
@@ -41,10 +42,13 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   | Single rows | One row of upright books per shelf |
   | Efficient | Two rows deep, the back row raised on risers so it stays visible, flat stacks on top of it |
   | Dense | Two rows deep with flat stacks on top of both rows; holds the most, but hides the back row |
-| Free float | Wherever you drag them: any shelf, any spot along it, front to back, turned any way up |
+  | Free float | Wherever you drag them: any shelf or the top of any bookcase, any spot along it, front to back, turned any way up |
 
   Free float starts from the layout you were in. A book you drop rests on the shelf or on whatever
-  is under it, and books left without support fall into place. Use **Add bookcase** for more room,
+  is under it, and books left without support fall into place. Dropped into a full row, a book
+  wedges itself in and pushes its neighbours aside. If the row has no room left, it lies flat
+  across the tops of the other books instead. The top of each bookcase is a surface too, spanning
+  the whole width of the case. Use **Add bookcase** for more room,
   **Remove empty** to take out every bookcase with nothing in it, and **Reset places** to go back
   to single rows. Books can be turned in quarter turns to any of
   the 24 ways a book can sit square on a shelf, for example cover out or lying on its back. When
@@ -62,7 +66,13 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   panel, a neighbour that reaches at least 30% of its height, or enough books standing together
   (about four). A book facing out needs the back panel or something behind or in front of it. A
   book with something in the way of its fall ends up leaning on that instead. Dropping a book
-  within about an inch of a wall or neighbour sets it down against it.
+  within about an inch of a wall or neighbour sets it down against it. A book resting on other
+  books with its middle past the edge of what holds it up slides off. The top of a bookcase has
+  no side panels, so a lone upright book there falls over.
+
+  Books move with gravity. They fall faster as they drop and bounce a little when they land, and
+  a book tipping over starts slowly and then slams down. A book you are dragging floats just
+  above where it would rest, so letting go drops it into place.
 
 ![The efficient layout: back row on risers with flat stacks on top](docs/efficient.jpg)
 
@@ -111,8 +121,8 @@ To stop the app, press `Ctrl+C` in the terminal.
 | See a book's cover | Click the book (click again or press `Esc` to put it back) |
 | Add or remove a volume of the selected series | `+` / `−` |
 | Move a shelf | Drag the shelf board up or down (`Esc` cancels) |
-| Move a figure | Drag it; in free float, scroll while dragging to move it front to back |
-| Move a book (free float) | Drag it; drag empty space to orbit |
+| Move a figure | Drag it, also onto the top of a bookcase; in free float, scroll while dragging to move it front to back |
+| Move a book (free float) | Drag it, also into a full row or onto the top of a bookcase; drag empty space to orbit |
 | Push it back or pull it forward (free float) | Scroll while dragging |
 | Turn a book (free float) | `R` rolls it, `T` turns it to face another way, `F` tips it over; works on the book you are dragging or pointing at |
 | Stand a book back up (free float) | Double-click it |
