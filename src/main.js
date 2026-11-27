@@ -1673,7 +1673,7 @@ function showTooltip(event) {
 // the wheel, the up and down arrows or Shift plus pointer motion move it front to back, and R, T
 // and F turn it a quarter turn at a time. `wantZ` is the depth asked for and `spot.z` the nearest
 // depth where it can rest; `planeZ` keeps the pointer's drag plane still while depth changes.
-let drag = null; // { mesh, slot, offsetX, wantZ, planeZ, anchor, o, event, moved, spot }
+let drag = null; // { mesh, slot, offsetX, wantZ, planeZ, anchor, o, event, moved, spot, pointerId }
 let shiftHeld = false;
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -1685,7 +1685,7 @@ function planeHit(event, z) {
 }
 
 // Shelf boards: drag one up or down, in any layout. Every bookcase shares the same spacing.
-let shelfDrag = null; // { k, grabY, base, y, moved }
+let shelfDrag = null; // { k, grabY, base, y, moved, pointerId, event }
 
 // The book, figure or movable board under the pointer, whichever is in front.
 function pickAny(event) {
@@ -1763,7 +1763,7 @@ function resolveDepth(shelf, bodies, look, x, wantZ, o) {
 
 // Figures: drag one to another spot or shelf, in any layout. In free float it moves front to back
 // like a book; in the packed layouts it stands at the front edge.
-let figDrag = null; // { group, fig, event, offsetX, wantZ, planeZ, anchor, moved, spot }
+let figDrag = null; // { group, fig, event, offsetX, wantZ, planeZ, anchor, moved, spot, pointerId }
 
 function updateFigDrag() {
   const { fig } = figDrag;
@@ -1832,12 +1832,45 @@ function endShelfDrag(keep) {
   changeDims({ boards }, false);
 }
 
+// Whether an event comes from the pointer holding the current grab, or no grab is on.
+function ownPointer(event) {
+  const grab = drag || figDrag || shelfDrag;
+  return !grab || grab.pointerId === event.pointerId;
+}
+
+// A second finger landing before the first has moved anything means a pinch or a two-finger pan,
+// not a grab. Put the grabbed thing back and hand the first finger to OrbitControls, which never
+// saw its press because it was disabled.
+let replaying = false;
+function cancelGrabForGesture() {
+  const grab = drag || figDrag || shelfDrag;
+  if (!grab || grab.moved) return;
+  const { event } = grab;
+  if (drag) endDrag();
+  if (figDrag) endFigDrag();
+  if (shelfDrag) endShelfDrag(false);
+  replaying = true;
+  canvas.dispatchEvent(
+    new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, composed: true,
+      pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: true, button: 0, buttons: 1,
+      clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+    }),
+  );
+  replaying = false;
+}
+
 // Runs before OrbitControls sees the press, so grabbing a book or a board does not also orbit
 // the camera.
 window.addEventListener(
   'pointerdown',
   (event) => {
-    if (event.button !== 0 || event.target !== canvas || drag || shelfDrag || figDrag) return;
+    if (replaying || event.target !== canvas) return;
+    if (!event.isPrimary) {
+      cancelGrabForGesture();
+      return;
+    }
+    if (event.button !== 0 || drag || shelfDrag || figDrag) return;
     const mesh = pickAny(event);
     if (!mesh) return;
     shiftHeld = event.shiftKey;
@@ -1848,6 +1881,7 @@ window.addEventListener(
         group: mesh, fig, event,
         offsetX: hit ? hit.x - mesh.userData.position.x : 0,
         wantZ: figureZ(fig), planeZ: mesh.userData.position.z, anchor: null, moved: false, spot: null,
+        pointerId: event.pointerId,
       };
       hovered = null;
       controls.enabled = false;
@@ -1858,7 +1892,7 @@ window.addEventListener(
       const hit = planeHit(event, CASE_D / 2);
       if (!hit) return;
       const k = mesh.userData.board;
-      shelfDrag = { k, grabY: hit.y, base: BOARD_Y[k], y: BOARD_Y[k], moved: false };
+      shelfDrag = { k, grabY: hit.y, base: BOARD_Y[k], y: BOARD_Y[k], moved: false, pointerId: event.pointerId, event };
       hovered = null;
       controls.enabled = false;
       canvas.setPointerCapture(event.pointerId);
@@ -1871,6 +1905,7 @@ window.addEventListener(
       mesh, slot, event,
       offsetX: hit ? hit.x - slot.position.x : 0,
       wantZ: slot.z, planeZ: slot.z + BOOK_D / 2, anchor: null, o: slot.o, moved: false, spot: null,
+      pointerId: event.pointerId,
     };
     controls.enabled = false;
     canvas.setPointerCapture(event.pointerId);
@@ -2014,14 +2049,17 @@ canvas.addEventListener(
   },
   { passive: false },
 );
-canvas.addEventListener('pointercancel', () => {
+canvas.addEventListener('pointercancel', (event) => {
+  if (!ownPointer(event)) return;
   if (drag) endDrag();
   if (shelfDrag) endShelfDrag(false);
   if (figDrag) endFigDrag();
 });
 
 canvas.addEventListener('pointermove', (event) => {
+  if (!ownPointer(event)) return;
   if (shelfDrag) {
+    shelfDrag.event = event;
     updateShelfDrag(event);
     return;
   }
@@ -2063,8 +2101,10 @@ canvas.addEventListener('pointerleave', () => {
   hovered = null;
   tooltip.hidden = true;
 });
-canvas.addEventListener('pointerdown', (event) => (downAt = [event.clientX, event.clientY]));
+// A press that ever had a second finger with it was a gesture, not a tap.
+canvas.addEventListener('pointerdown', (event) => (downAt = event.isPrimary ? [event.clientX, event.clientY] : null));
 canvas.addEventListener('pointerup', (event) => {
+  if (!event.isPrimary || !ownPointer(event)) return;
   if (shelfDrag) {
     const { moved } = shelfDrag;
     endShelfDrag(true);
