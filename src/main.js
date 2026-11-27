@@ -1504,7 +1504,6 @@ function syncScene() {
     riser.position.copy(position);
     riserGroup.add(riser);
   }
-  renderLayoutNote();
   syncFigures();
 
   const live = new Set();
@@ -1540,6 +1539,7 @@ function syncScene() {
   const ids = new Set(series.map((s) => s.id));
   for (const id of [...seriesMaterials.keys()]) if (!ids.has(id)) disposeMaterials(id);
   firstSync = false;
+  renderLayoutNote();
 }
 
 // ---------------------------------------------------------------------------
@@ -1615,6 +1615,9 @@ function resize() {
   const free = freeRect();
   camera.setViewOffset(w, h, w / 2 - (free.x + free.w / 2), h / 2 - (free.y + free.h / 2), w, h);
   camera.updateProjectionMatrix();
+  actionsEl.style.left = `${free.x + free.w / 2}px`;
+  actionsEl.style.bottom = `${h - (free.y + free.h) + 12}px`;
+  actionsEl.style.maxWidth = `${free.w - 24}px`;
 }
 window.addEventListener('resize', resize);
 new ResizeObserver(resize).observe(panel);
@@ -2030,6 +2033,104 @@ function standUp(slot) {
   }
 }
 
+// Turn a resting book a quarter turn about one shelf axis, where it stands.
+function turnInPlace(slot, axis) {
+  const spot = dropSpot(slot.shelf, bodiesIn(free.books, slot.shelf, slot.key), slot.look, slot.x, slot.z, TURNS[slot.o][axis]);
+  if (spot) moveBook(slot, { ...spot, shelf: slot.shelf });
+}
+
+// Push a resting book back (dz < 0) or pull it forward to the nearest depth that fits that way.
+function pushBook(slot, dz) {
+  const range = zRange(extent(slot.look, slot.o).d);
+  const want = clamp(slot.z + dz, range[0], Math.max(...range));
+  const spot = resolveDepth(slot.shelf, bodiesIn(free.books, slot.shelf, slot.key), slot.look, slot.x, want, slot.o);
+  if (spot && (spot.z - slot.z) * dz > 1e-6) moveBook(slot, { ...spot, shelf: slot.shelf });
+}
+
+function moveFigure(id, shelf, x, z = Infinity) {
+  const f = figures.find((item) => item.id === id);
+  const fit = f && figureFits(figures, id, f.size, shelf, x, layoutMode === 'free' ? z : Infinity);
+  if (fit) setFigures(figures.map((item) => (item.id === id ? { ...item, shelf, ...fit } : item)));
+  return fit;
+}
+
+function pushFigure(f, dz) {
+  const range = zRange(FIGURE_SIZES[f.size].w);
+  const want = clamp(figureZ(f) + dz, range[0], Math.max(...range));
+  const fit = nearestDepth(want, range, (z) => figureFits(figures, f.id, f.size, f.shelf, f.x, z));
+  if (fit && (fit.z - figureZ(f)) * dz > 1e-6) moveFigure(f.id, f.shelf, f.x, fit.z);
+}
+
+// Touch has no hover, keys or right button, so a tapped book or figure becomes the target of a bar
+// of buttons. The keys that do the same with a mouse read this table too.
+let actionTarget = null; // { kind: 'book', key } | { kind: 'figure', id } | null
+const targetItem = (target) =>
+  target?.kind === 'book' ? books.get(target.key)?.userData.slot : figures.find((f) => f.id === target?.id);
+
+function endActions() {
+  actionTarget = null;
+  inspectedKey = null;
+  groupId = null;
+  renderLayoutNote();
+}
+
+const turn = (slot, { axis }) => turnInPlace(slot, axis);
+const push = (item, { dz }, kind) => (kind === 'book' ? pushBook(item, dz) : pushFigure(item, dz));
+const ACTIONS = [
+  { id: 'roll', key: 'r', label: 'Roll', axis: 2, kinds: ['book'], modes: ['free'], run: turn },
+  { id: 'turn', key: 't', label: 'Turn', axis: 1, kinds: ['book'], modes: ['free'], run: turn },
+  { id: 'tip', key: 'f', label: 'Tip over', axis: 0, kinds: ['book'], modes: ['free'], run: turn },
+  { id: 'stand', label: 'Stand up', kinds: ['book'], modes: ['free'], run: standUp },
+  { id: 'back', key: 'ArrowUp', label: 'Push back', dz: -DEPTH_KEY_STEP, kinds: ['book', 'figure'], modes: ['free'], run: push },
+  { id: 'forward', key: 'ArrowDown', label: 'Pull forward', dz: DEPTH_KEY_STEP, kinds: ['book', 'figure'], modes: ['free'], run: push },
+  {
+    id: 'series', label: 'Move whole series', kinds: ['book'], modes: ['free'],
+    run: (slot) => {
+      groupId = groupId === slot.series.id ? null : slot.series.id;
+      renderLayoutNote();
+    },
+  },
+  { id: 'done', label: 'Done', kinds: ['book', 'figure'], modes: LAYOUT_MODES, run: endActions },
+];
+const actionFor = (key) => ACTIONS.find((action) => action.key === (key.length === 1 ? key.toLowerCase() : key));
+
+const actionsEl = document.getElementById('book-actions');
+const actionButtons = new Map(
+  ACTIONS.map((action) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = action.label;
+    button.dataset.action = action.id;
+    actionsEl.append(button);
+    return [action.id, button];
+  }),
+);
+
+function setTarget(target) {
+  actionTarget = target;
+  renderActions();
+}
+
+function renderActions() {
+  const item = actionTarget && targetItem(actionTarget);
+  if (!item) actionTarget = null;
+  const applies = (action) => actionTarget && action.kinds.includes(actionTarget.kind) && action.modes.includes(layoutMode);
+  for (const action of ACTIONS) actionButtons.get(action.id).hidden = !applies(action);
+  actionsEl.hidden = lastPointer !== 'touch' || !ACTIONS.some((action) => action.id !== 'done' && applies(action));
+  if (actionTarget?.kind !== 'book') return;
+  actionButtons.get('stand').disabled = item.o === 0;
+  actionButtons.get('series').setAttribute('aria-pressed', String(groupId === item.series.id));
+}
+
+actionsEl.addEventListener('click', (event) => {
+  const action = ACTIONS.find((item) => item.id === event.target.closest('button')?.dataset.action);
+  const item = action && actionTarget && targetItem(actionTarget);
+  if (!item) return;
+  if (action.id !== 'done') inspectedKey = null; // put the cover away before the book moves
+  action.run(item, action, actionTarget.kind);
+  renderActions();
+});
+
 canvas.addEventListener(
   'wheel',
   (event) => {
@@ -2115,6 +2216,7 @@ canvas.addEventListener('pointerup', (event) => {
     endFigDrag();
     if (moved) {
       if (spot) setFigures(figures.map((f) => (f.id === fig.id ? { ...f, shelf: spot.shelf, x: spot.x, z: spot.z } : f)));
+      if (event.pointerType === 'touch') setTarget({ kind: 'figure', id: fig.id });
       return;
     }
   }
@@ -2123,11 +2225,14 @@ canvas.addEventListener('pointerup', (event) => {
     endDrag();
     if (moved) {
       if (spot) dropBook(slot, spot);
+      if (event.pointerType === 'touch') setTarget({ kind: 'book', key: slot.key });
       return;
     }
   }
   if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) return; // it was a drag
-  const mesh = pick(event);
+  const touch = event.pointerType === 'touch';
+  const hit = pickAny(event);
+  const mesh = hit?.userData.slot ? hit : null;
   clearTimeout(clickTimer);
   if (event.button === 2) {
     // Right-click: pick the whole series, so that dragging one of its books moves all of them.
@@ -2140,14 +2245,20 @@ canvas.addEventListener('pointerup', (event) => {
     return;
   }
   if (event.button !== 0) return;
+  if (touch && hit?.userData.figure) {
+    setTarget({ kind: 'figure', id: hit.userData.figure.id });
+    return;
+  }
   if (!mesh) {
     inspectedKey = null;
     groupId = null;
+    actionTarget = null;
     select(null);
     renderLayoutNote();
     return;
   }
   const { slot } = mesh.userData;
+  if (touch) actionTarget = { kind: 'book', key: slot.key };
   const open = () => {
     inspectedKey = inspectedKey === slot.key ? null : slot.key;
     if (inspectedKey) {
@@ -2159,7 +2270,8 @@ canvas.addEventListener('pointerup', (event) => {
     renderLayoutNote();
   };
   // In free float a double-click stands the book up, so wait a moment to see if one is coming.
-  if (layoutMode === 'free') clickTimer = setTimeout(open, 230);
+  // Touch has Stand up in the action bar instead.
+  if (layoutMode === 'free' && !touch) clickTimer = setTimeout(open, 230);
   else open();
 });
 
@@ -2335,6 +2447,7 @@ function renderLayoutNote() {
   togetherEl.hidden = layoutMode !== 'free';
   stacksEl.hidden = layoutMode !== 'efficient';
   removeCaseEl.disabled = layout.cases < 2 || !emptyCases().length;
+  renderActions();
 }
 
 // Bookcases holding no books and no figures, wherever they are in the row.
@@ -2641,9 +2754,10 @@ malFileEl.addEventListener('change', () => {
 
 // Arrow up pushes the dragged thing back and arrow down pulls it forward. True when it was one.
 function depthKey(event, d) {
-  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return false;
+  const dz = actionFor(event.key)?.dz;
+  if (!dz) return false;
   event.preventDefault();
-  nudgeDepth(d, event.key === 'ArrowUp' ? -DEPTH_KEY_STEP : DEPTH_KEY_STEP);
+  nudgeDepth(d, dz);
   return true;
 }
 
@@ -2659,7 +2773,7 @@ window.addEventListener('keydown', (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return; // leave browser shortcuts alone
   if (event.target.closest('input, textarea')) return;
   // Quarter turns in free float: R rolls the book, T turns it to face another way, F tips it over.
-  const axis = { f: 0, t: 1, r: 2 }[event.key.toLowerCase()];
+  const { axis } = actionFor(event.key) ?? {};
   if (shelfDrag) {
     if (event.key === 'Escape') endShelfDrag(false); // put the board back where it was
     return;
@@ -2688,15 +2802,13 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (axis !== undefined && layoutMode === 'free' && hovered) {
-    // Turn the book under the pointer where it stands.
-    const { slot } = hovered.userData;
-    const spot = dropSpot(slot.shelf, bodiesIn(free.books, slot.shelf, slot.key), slot.look, slot.x, slot.z, TURNS[slot.o][axis]);
-    if (spot) moveBook(slot, { ...spot, shelf: slot.shelf });
+    turnInPlace(hovered.userData.slot, axis); // the book under the pointer, where it stands
     return;
   }
   if (event.key === 'Escape') {
     inspectedKey = null;
     groupId = null;
+    actionTarget = null;
     select(null);
     renderLayoutNote();
   }
@@ -2865,12 +2977,7 @@ window.__shelf = {
     if (spot) setFigures([...figures, { id: newId(), name, size, ...spot }]);
     return spot;
   },
-  moveFigure: (id, shelf, x, z = Infinity) => {
-    const f = figures.find((item) => item.id === id);
-    const fit = f && figureFits(figures, id, f.size, shelf, x, layoutMode === 'free' ? z : Infinity);
-    if (fit) setFigures(figures.map((item) => (item.id === id ? { ...item, shelf, ...fit } : item)));
-    return fit;
-  },
+  moveFigure,
   setDims: (raw) => changeDims(raw),
   turns: TURNS,
   get limits() { return { SHELF_W, CASE_W, CASE_H, TOP_CLEAR, BOOK_D, CASE_D, BOOK_Z, SHELVES, TWO_DEEP, clears: ROW_CLEAR, floors: ROW_FLOOR }; },
