@@ -12,6 +12,8 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   series, or the form at the top to add a new one. Undo reverses any change.
 - **Shows the cover.** Click a book and it slides out and turns to face you.
 - **Finds a series.** Search by title or author, then click the row and the camera flies to it.
+- **Works on phones.** On a narrow screen the panel is a sheet at the bottom. Tap its handle to
+  open or close it. Tapping a book in free float shows buttons for what the keys do on a computer.
 - **Displays figures.** Open **Figures** to add one by name and size, then drag it to any shelf
   or onto the top of a bookcase.
   Figures stand in front of the books: a book can sit behind a figure, never in front of one.
@@ -125,21 +127,21 @@ To stop the app, press `Ctrl+C` in the terminal.
 
 ## Controls
 
-| Action | How |
-| --- | --- |
-| Orbit | Drag |
-| Pan | Right-drag |
-| Zoom | Scroll |
-| See a book's cover | Click the book (click again or press `Esc` to put it back) |
-| Add or remove a volume of the selected series | `+` / `−` |
-| Move a shelf | Drag the shelf board up or down (`Esc` cancels) |
-| Move a figure | Drag it, also onto the top of a bookcase; in free float, scroll, hold `Shift` and move the pointer up or down, or press `↑` / `↓` while dragging to move it front to back |
-| Move a book (free float) | Drag it, also into a full row or onto the top of a bookcase; drag empty space to orbit |
-| Push it back or pull it forward (free float) | Scroll, hold `Shift` and move the pointer up or down, or press `↑` / `↓` while dragging |
-| Turn a book (free float) | `R` rolls it, `T` turns it to face another way, `F` tips it over; works on the book you are dragging or pointing at |
-| Stand a book back up (free float) | Double-click it |
-| Pick a whole series to move together (free float) | Right-click one of its books (again, or `Esc`, lets go) |
-| Cancel a move (free float) | `Esc` while dragging |
+| Action | Mouse and keyboard | Touch |
+| --- | --- | --- |
+| Orbit | Drag | Drag with one finger |
+| Pan | Right-drag | Drag with two fingers |
+| Zoom | Scroll | Pinch |
+| See a book's cover | Click the book (click again or press `Esc` to put it back) | Tap the book (tap it again to put it back) |
+| Add or remove a volume of the selected series | `+` / `−` | **−** / **+** in the sheet |
+| Move a shelf | Drag the shelf board up or down (`Esc` cancels) | Drag the shelf board up or down |
+| Move a figure | Drag it, also onto the top of a bookcase; in free float, scroll, hold `Shift` and move the pointer up or down, or press `↑` / `↓` while dragging to move it front to back | Drag it; in free float, tap it, then **Push back** or **Pull forward** |
+| Move a book (free float) | Drag it, also into a full row or onto the top of a bookcase; drag empty space to orbit | Drag it; drag empty space to orbit |
+| Push it back or pull it forward (free float) | Scroll, hold `Shift` and move the pointer up or down, or press `↑` / `↓` while dragging | Tap it, then **Push back** or **Pull forward** |
+| Turn a book (free float) | `R` rolls it, `T` turns it to face another way, `F` tips it over; works on the book you are dragging or pointing at | Tap it, then **Roll**, **Turn** or **Tip over** |
+| Stand a book back up (free float) | Double-click it | Tap it, then **Stand up** |
+| Pick a whole series to move together (free float) | Right-click one of its books (again, or `Esc`, lets go) | Tap one of its books, then **Move whole series** (again, or **Done**, lets go) |
+| Cancel a move (free float) | `Esc` while dragging | Put a second finger down before the book moves, or press **Undo** after |
 
 ## Using your own collection
 
