@@ -27,8 +27,8 @@ bookcase you can orbit around, with real cover art, and you can add or remove bo
   | 1/4 scale | 42 cm |
 
   In the packed layouts a figure stands at the front edge and the books behind it move to the
-  back of the shelf, or flow around it when there is no room behind. In free float, scroll while
-  dragging a figure to move it front to back; books in its way are pushed back or moved to
+  back of the shelf, or flow around it when there is no room behind. In free float, scroll, press `↑` / `↓`
+  or hold `Shift` and move the pointer while dragging a figure to move it front to back; books in its way are pushed back or moved to
   another gap. A figure needs a shelf tall enough for it, so a 1/4 scale figure needs a shelf
   board moved first, or the top of a bookcase, which has 60 cm of room above it.
 - **Resizes the bookcase.** Open **Bookcase size** to set the height, width, depth (in inches) and
@@ -121,9 +121,9 @@ To stop the app, press `Ctrl+C` in the terminal.
 | See a book's cover | Click the book (click again or press `Esc` to put it back) |
 | Add or remove a volume of the selected series | `+` / `−` |
 | Move a shelf | Drag the shelf board up or down (`Esc` cancels) |
-| Move a figure | Drag it, also onto the top of a bookcase; in free float, scroll while dragging to move it front to back |
+| Move a figure | Drag it, also onto the top of a bookcase; in free float, scroll, hold `Shift` and move the pointer up or down, or press `↑` / `↓` while dragging to move it front to back |
 | Move a book (free float) | Drag it, also into a full row or onto the top of a bookcase; drag empty space to orbit |
-| Push it back or pull it forward (free float) | Scroll while dragging |
+| Push it back or pull it forward (free float) | Scroll, hold `Shift` and move the pointer up or down, or press `↑` / `↓` while dragging |
 | Turn a book (free float) | `R` rolls it, `T` turns it to face another way, `F` tips it over; works on the book you are dragging or pointing at |
 | Stand a book back up (free float) | Double-click it |
 | Pick a whole series to move together (free float) | Right-click one of its books (again, or `Esc`, lets go) |
