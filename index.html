@@ -75,6 +75,17 @@
         </form>
       </details>
 
+      <details id="list-import">
+        <summary>Import a list</summary>
+        <form id="list-import-form" autocomplete="off">
+          <input id="list-import-user" placeholder="AniList username" />
+          <button type="submit">Import from AniList</button>
+        </form>
+        <button type="button" id="mal-import" title="Profile, Export lists, Manga on myanimelist.net">Import MyAnimeList export</button>
+        <input id="mal-file" type="file" accept=".xml,.gz,application/xml,application/gzip" hidden />
+        <p id="list-import-note"></p>
+      </details>
+
       <input id="search" type="search" placeholder="Search title or author…" />
 
       <ul id="list"></ul>
