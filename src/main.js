@@ -1504,7 +1504,6 @@ function syncScene() {
     riser.position.copy(position);
     riserGroup.add(riser);
   }
-  renderLayoutNote();
   syncFigures();
 
   const live = new Set();
@@ -1540,6 +1539,7 @@ function syncScene() {
   const ids = new Set(series.map((s) => s.id));
   for (const id of [...seriesMaterials.keys()]) if (!ids.has(id)) disposeMaterials(id);
   firstSync = false;
+  renderLayoutNote();
 }
 
 // ---------------------------------------------------------------------------
@@ -1547,33 +1547,63 @@ function syncScene() {
 // ---------------------------------------------------------------------------
 
 let cameraGoal = null; // { position, target } while flying somewhere
-controls.addEventListener('start', () => (cameraGoal = null));
+let overviewShown = false; // the last camera move framed every bookcase
+controls.addEventListener('start', () => {
+  cameraGoal = null;
+  overviewShown = false;
+});
 
-function usableAspect() {
-  const inset = panel.getBoundingClientRect().right;
-  return Math.max(0.3, (window.innerWidth - inset) / window.innerHeight);
+// The part of the window the panel leaves uncovered: the right of it when it is a side panel, the
+// top when it is a bottom sheet. Whichever leaves more room is the one the panel is not covering.
+function freeRect() {
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const { right, top } = panel.getBoundingClientRect();
+  const beside = { x: right, y: 0, w: W - right, h: H };
+  const above = { x: 0, y: 0, w: W, h: top };
+  const rect = beside.w * beside.h >= above.w * above.h ? beside : above;
+  return { ...rect, w: Math.max(1, rect.w), h: Math.max(1, rect.h) };
 }
 
+// The field of view spans the whole window, so fitting into a smaller rect needs more distance.
 function distanceToFit(width, height) {
   const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  return Math.max(height / 2 / tan, width / 2 / tan / usableAspect()) * 1.12;
+  const { w, h } = freeRect();
+  const H = window.innerHeight;
+  return (Math.max((height * H) / h, (width * H) / w) / 2 / tan) * 1.12;
 }
 
 function flyTo(center, width, height, minDistance = 10) {
   const distance = Math.max(minDistance, distanceToFit(width, height));
+  overviewShown = false;
   cameraGoal = {
     target: center.clone(),
     position: center.clone().add(new THREE.Vector3(0, distance * 0.06, distance)),
   };
 }
 
-function overview(instant) {
+function overviewHeight() {
   const tall = [
     ...layout.slots.filter((slot) => slot.shelf < 0).map((slot) => slot.y + slot.h / 2),
     ...figures.filter((f) => f.shelf < 0).map((f) => FIGURE_SIZES[f.size].h),
   ];
-  const height = CASE_H + (tall.length ? Math.max(...tall) + 0.4 : 0); // keep what stands on top in view
+  return CASE_H + (tall.length ? Math.max(...tall) + 0.4 : 0); // keep what stands on top in view
+}
+
+// A tall phone screen needs to stand further back to fit every bookcase, so the zoom limit and
+// the fog move back with it.
+function updateReach(height) {
+  const reach = distanceToFit(layout.cases * CASE_W, height);
+  controls.maxDistance = Math.max(90, reach * 1.05);
+  scene.fog.near = Math.max(60, reach + 12);
+  scene.fog.far = Math.max(140, reach + 92);
+}
+
+function overview(instant) {
+  const height = overviewHeight();
+  updateReach(height);
   flyTo(new THREE.Vector3(0, height / 2, 0), layout.cases * CASE_W, height);
+  overviewShown = true;
   if (instant) {
     camera.position.copy(cameraGoal.position);
     controls.target.copy(cameraGoal.target);
@@ -1601,16 +1631,39 @@ function resize() {
   const h = window.innerHeight;
   renderer.setSize(w, h, false);
   camera.aspect = w / h;
-  // Shift the view so the scene is centred in the area not covered by the side panel.
-  const inset = panel.getBoundingClientRect().right;
-  camera.setViewOffset(w, h, -inset / 2, 0, w, h);
+  // Shift the view so the scene is centred in the area the panel leaves uncovered.
+  const free = freeRect();
+  camera.setViewOffset(w, h, w / 2 - (free.x + free.w / 2), h / 2 - (free.y + free.h / 2), w, h);
   camera.updateProjectionMatrix();
+  updateReach(overviewHeight());
+  actionsEl.style.left = `${free.x + free.w / 2}px`;
+  actionsEl.style.bottom = `max(${h - (free.y + free.h) + 12}px, calc(12px + env(safe-area-inset-bottom)))`;
+  actionsEl.style.maxWidth = `${free.w - 24}px`;
 }
 window.addEventListener('resize', resize);
+new ResizeObserver(resize).observe(panel);
 
 // ---------------------------------------------------------------------------
 // Picking: hover pulls a book out, click selects its series
 // ---------------------------------------------------------------------------
+
+// Fingers and pens get the touch controls, only a mouse gets hover and the keyboard hints.
+const isTouchLike = (event) => event.pointerType !== 'mouse';
+
+// The kind of pointer used last, so help text and controls match the hand on the device.
+let lastPointer = matchMedia('(pointer: coarse)').matches ? 'touch' : 'mouse';
+document.documentElement.dataset.input = lastPointer;
+window.addEventListener(
+  'pointerdown',
+  (event) => {
+    const kind = isTouchLike(event) ? 'touch' : 'mouse';
+    if (kind === lastPointer) return;
+    lastPointer = kind;
+    document.documentElement.dataset.input = kind;
+    renderLayoutNote();
+  },
+  true,
+);
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -1647,7 +1700,7 @@ function showTooltip(event) {
 // the wheel, the up and down arrows or Shift plus pointer motion move it front to back, and R, T
 // and F turn it a quarter turn at a time. `wantZ` is the depth asked for and `spot.z` the nearest
 // depth where it can rest; `planeZ` keeps the pointer's drag plane still while depth changes.
-let drag = null; // { mesh, slot, offsetX, wantZ, planeZ, anchor, o, event, moved, spot }
+let drag = null; // { mesh, slot, offsetX, wantZ, planeZ, anchor, o, event, moved, spot, pointerId }
 let shiftHeld = false;
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -1659,7 +1712,7 @@ function planeHit(event, z) {
 }
 
 // Shelf boards: drag one up or down, in any layout. Every bookcase shares the same spacing.
-let shelfDrag = null; // { k, grabY, base, y, moved }
+let shelfDrag = null; // { k, grabY, base, y, moved, far, pointerId, event }; far is a screen distance, moved a height change
 
 // The book, figure or movable board under the pointer, whichever is in front.
 function pickAny(event) {
@@ -1737,7 +1790,7 @@ function resolveDepth(shelf, bodies, look, x, wantZ, o) {
 
 // Figures: drag one to another spot or shelf, in any layout. In free float it moves front to back
 // like a book; in the packed layouts it stands at the front edge.
-let figDrag = null; // { group, fig, event, offsetX, wantZ, planeZ, anchor, moved, spot }
+let figDrag = null; // { group, fig, event, offsetX, wantZ, planeZ, anchor, moved, spot, pointerId }
 
 function updateFigDrag() {
   const { fig } = figDrag;
@@ -1806,12 +1859,45 @@ function endShelfDrag(keep) {
   changeDims({ boards }, false);
 }
 
+// Whether an event comes from the pointer holding the current grab, or no grab is on.
+function ownPointer(event) {
+  const grab = drag || figDrag || shelfDrag;
+  return !grab || grab.pointerId === event.pointerId;
+}
+
+// A second finger landing before the first has moved anything means a pinch or a two-finger pan,
+// not a grab. Put the grabbed thing back and hand the first finger to OrbitControls, which never
+// saw its press because it was disabled.
+let replaying = false;
+function cancelGrabForGesture() {
+  const grab = drag || figDrag || shelfDrag;
+  if (!grab || (grab === shelfDrag ? grab.far : grab.moved)) return;
+  const { event } = grab;
+  if (drag) endDrag();
+  if (figDrag) endFigDrag();
+  if (shelfDrag) endShelfDrag(false);
+  replaying = true;
+  canvas.dispatchEvent(
+    new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, composed: true,
+      pointerId: event.pointerId, pointerType: event.pointerType, isPrimary: true, button: 0, buttons: 1,
+      clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+    }),
+  );
+  replaying = false;
+}
+
 // Runs before OrbitControls sees the press, so grabbing a book or a board does not also orbit
 // the camera.
 window.addEventListener(
   'pointerdown',
   (event) => {
-    if (event.button !== 0 || event.target !== canvas || drag || shelfDrag || figDrag) return;
+    if (replaying || event.target !== canvas) return;
+    if (!event.isPrimary) {
+      cancelGrabForGesture();
+      return;
+    }
+    if (event.button !== 0 || drag || shelfDrag || figDrag) return;
     const mesh = pickAny(event);
     if (!mesh) return;
     shiftHeld = event.shiftKey;
@@ -1822,6 +1908,7 @@ window.addEventListener(
         group: mesh, fig, event,
         offsetX: hit ? hit.x - mesh.userData.position.x : 0,
         wantZ: figureZ(fig), planeZ: mesh.userData.position.z, anchor: null, moved: false, spot: null,
+        pointerId: event.pointerId,
       };
       hovered = null;
       controls.enabled = false;
@@ -1832,7 +1919,7 @@ window.addEventListener(
       const hit = planeHit(event, CASE_D / 2);
       if (!hit) return;
       const k = mesh.userData.board;
-      shelfDrag = { k, grabY: hit.y, base: BOARD_Y[k], y: BOARD_Y[k], moved: false };
+      shelfDrag = { k, grabY: hit.y, base: BOARD_Y[k], y: BOARD_Y[k], moved: false, far: false, pointerId: event.pointerId, event };
       hovered = null;
       controls.enabled = false;
       canvas.setPointerCapture(event.pointerId);
@@ -1845,6 +1932,7 @@ window.addEventListener(
       mesh, slot, event,
       offsetX: hit ? hit.x - slot.position.x : 0,
       wantZ: slot.z, planeZ: slot.z + BOOK_D / 2, anchor: null, o: slot.o, moved: false, spot: null,
+      pointerId: event.pointerId,
     };
     controls.enabled = false;
     canvas.setPointerCapture(event.pointerId);
@@ -1969,6 +2057,104 @@ function standUp(slot) {
   }
 }
 
+// Turn a resting book a quarter turn about one shelf axis, where it stands.
+function turnInPlace(slot, axis) {
+  const spot = dropSpot(slot.shelf, bodiesIn(free.books, slot.shelf, slot.key), slot.look, slot.x, slot.z, TURNS[slot.o][axis]);
+  if (spot) moveBook(slot, { ...spot, shelf: slot.shelf });
+}
+
+// Push a resting book back (dz < 0) or pull it forward to the nearest depth that fits that way.
+function pushBook(slot, dz) {
+  const range = zRange(extent(slot.look, slot.o).d);
+  const want = clamp(slot.z + dz, range[0], Math.max(...range));
+  const spot = resolveDepth(slot.shelf, bodiesIn(free.books, slot.shelf, slot.key), slot.look, slot.x, want, slot.o);
+  if (spot && (spot.z - slot.z) * dz > 1e-6) moveBook(slot, { ...spot, shelf: slot.shelf });
+}
+
+function moveFigure(id, shelf, x, z = Infinity) {
+  const f = figures.find((item) => item.id === id);
+  const fit = f && figureFits(figures, id, f.size, shelf, x, layoutMode === 'free' ? z : Infinity);
+  if (fit) setFigures(figures.map((item) => (item.id === id ? { ...item, shelf, ...fit } : item)));
+  return fit;
+}
+
+function pushFigure(f, dz) {
+  const range = zRange(FIGURE_SIZES[f.size].w);
+  const want = clamp(figureZ(f) + dz, range[0], Math.max(...range));
+  const fit = nearestDepth(want, range, (z) => figureFits(figures, f.id, f.size, f.shelf, f.x, z));
+  if (fit && (fit.z - figureZ(f)) * dz > 1e-6) moveFigure(f.id, f.shelf, f.x, fit.z);
+}
+
+// Touch has no hover, keys or right button, so a tapped book or figure becomes the target of a bar
+// of buttons. The keys that do the same with a mouse read this table too.
+let actionTarget = null; // { kind: 'book', key } | { kind: 'figure', id } | null
+const targetItem = (target) =>
+  target?.kind === 'book' ? books.get(target.key)?.userData.slot : figures.find((f) => f.id === target?.id);
+
+function endActions() {
+  actionTarget = null;
+  inspectedKey = null;
+  groupId = null;
+  renderLayoutNote();
+}
+
+const turn = (slot, { axis }) => turnInPlace(slot, axis);
+const push = (item, { dz }, kind) => (kind === 'book' ? pushBook(item, dz) : pushFigure(item, dz));
+const ACTIONS = [
+  { id: 'roll', key: 'r', label: 'Roll', axis: 2, kinds: ['book'], modes: ['free'], run: turn },
+  { id: 'turn', key: 't', label: 'Turn', axis: 1, kinds: ['book'], modes: ['free'], run: turn },
+  { id: 'tip', key: 'f', label: 'Tip over', axis: 0, kinds: ['book'], modes: ['free'], run: turn },
+  { id: 'stand', label: 'Stand up', kinds: ['book'], modes: ['free'], run: standUp },
+  { id: 'back', key: 'ArrowUp', label: 'Push back', dz: -DEPTH_KEY_STEP, kinds: ['book', 'figure'], modes: ['free'], run: push },
+  { id: 'forward', key: 'ArrowDown', label: 'Pull forward', dz: DEPTH_KEY_STEP, kinds: ['book', 'figure'], modes: ['free'], run: push },
+  {
+    id: 'series', label: 'Move whole series', kinds: ['book'], modes: ['free'],
+    run: (slot) => {
+      groupId = groupId === slot.series.id ? null : slot.series.id;
+      renderLayoutNote();
+    },
+  },
+  { id: 'done', label: 'Done', kinds: ['book', 'figure'], modes: LAYOUT_MODES, run: endActions },
+];
+const actionFor = (key) => ACTIONS.find((action) => action.key === (key.length === 1 ? key.toLowerCase() : key));
+
+const actionsEl = document.getElementById('book-actions');
+const actionButtons = new Map(
+  ACTIONS.map((action) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = action.label;
+    button.dataset.action = action.id;
+    actionsEl.append(button);
+    return [action.id, button];
+  }),
+);
+
+function setTarget(target) {
+  actionTarget = target;
+  renderActions();
+}
+
+function renderActions() {
+  const item = actionTarget && targetItem(actionTarget);
+  if (!item) actionTarget = null;
+  const applies = (action) => actionTarget && action.kinds.includes(actionTarget.kind) && action.modes.includes(layoutMode);
+  for (const action of ACTIONS) actionButtons.get(action.id).hidden = !applies(action);
+  actionsEl.hidden = lastPointer !== 'touch' || !ACTIONS.some((action) => action.id !== 'done' && applies(action));
+  if (actionTarget?.kind !== 'book') return;
+  actionButtons.get('stand').disabled = item.o === 0;
+  actionButtons.get('series').setAttribute('aria-pressed', String(groupId === item.series.id));
+}
+
+actionsEl.addEventListener('click', (event) => {
+  const action = ACTIONS.find((item) => item.id === event.target.closest('button')?.dataset.action);
+  const item = action && actionTarget && targetItem(actionTarget);
+  if (!item) return;
+  if (action.id !== 'done') inspectedKey = null; // put the cover away before the book moves
+  action.run(item, action, actionTarget.kind);
+  renderActions();
+});
+
 canvas.addEventListener(
   'wheel',
   (event) => {
@@ -1988,14 +2174,18 @@ canvas.addEventListener(
   },
   { passive: false },
 );
-canvas.addEventListener('pointercancel', () => {
+canvas.addEventListener('pointercancel', (event) => {
+  if (!ownPointer(event)) return;
   if (drag) endDrag();
   if (shelfDrag) endShelfDrag(false);
   if (figDrag) endFigDrag();
 });
 
 canvas.addEventListener('pointermove', (event) => {
+  if (!ownPointer(event)) return;
   if (shelfDrag) {
+    shelfDrag.event = event;
+    if (downAt && Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) shelfDrag.far = true;
     updateShelfDrag(event);
     return;
   }
@@ -2037,8 +2227,10 @@ canvas.addEventListener('pointerleave', () => {
   hovered = null;
   tooltip.hidden = true;
 });
-canvas.addEventListener('pointerdown', (event) => (downAt = [event.clientX, event.clientY]));
+// A press that ever had a second finger with it was a gesture, not a tap.
+canvas.addEventListener('pointerdown', (event) => (downAt = event.isPrimary ? [event.clientX, event.clientY] : null));
 canvas.addEventListener('pointerup', (event) => {
+  if (!event.isPrimary || !ownPointer(event)) return;
   if (shelfDrag) {
     const { moved } = shelfDrag;
     endShelfDrag(true);
@@ -2049,6 +2241,7 @@ canvas.addEventListener('pointerup', (event) => {
     endFigDrag();
     if (moved) {
       if (spot) setFigures(figures.map((f) => (f.id === fig.id ? { ...f, shelf: spot.shelf, x: spot.x, z: spot.z } : f)));
+      if (isTouchLike(event)) setTarget({ kind: 'figure', id: fig.id });
       return;
     }
   }
@@ -2057,11 +2250,14 @@ canvas.addEventListener('pointerup', (event) => {
     endDrag();
     if (moved) {
       if (spot) dropBook(slot, spot);
+      if (isTouchLike(event)) setTarget({ kind: 'book', key: slot.key });
       return;
     }
   }
   if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) return; // it was a drag
-  const mesh = pick(event);
+  const touch = isTouchLike(event);
+  const hit = pickAny(event);
+  const mesh = hit?.userData.slot ? hit : null;
   clearTimeout(clickTimer);
   if (event.button === 2) {
     // Right-click: pick the whole series, so that dragging one of its books moves all of them.
@@ -2074,14 +2270,23 @@ canvas.addEventListener('pointerup', (event) => {
     return;
   }
   if (event.button !== 0) return;
+  if (touch && hit?.userData.figure) {
+    inspectedKey = null;
+    groupId = null;
+    renderLayoutNote();
+    setTarget({ kind: 'figure', id: hit.userData.figure.id });
+    return;
+  }
   if (!mesh) {
     inspectedKey = null;
     groupId = null;
+    actionTarget = null;
     select(null);
     renderLayoutNote();
     return;
   }
   const { slot } = mesh.userData;
+  if (touch) actionTarget = { kind: 'book', key: slot.key };
   const open = () => {
     inspectedKey = inspectedKey === slot.key ? null : slot.key;
     if (inspectedKey) {
@@ -2093,7 +2298,8 @@ canvas.addEventListener('pointerup', (event) => {
     renderLayoutNote();
   };
   // In free float a double-click stands the book up, so wait a moment to see if one is coming.
-  if (layoutMode === 'free') clickTimer = setTimeout(open, 230);
+  // Touch has Stand up in the action bar instead.
+  if (layoutMode === 'free' && !touch) clickTimer = setTimeout(open, 230);
   else open();
 });
 
@@ -2116,6 +2322,26 @@ const listEl = document.getElementById('list');
 const totalsEl = document.getElementById('totals');
 const searchEl = document.getElementById('search');
 const undoEl = document.getElementById('undo');
+const peekSeriesEl = document.getElementById('peek-series');
+const sheetHintEl = document.getElementById('sheet-hint');
+const sheetHandleEl = document.getElementById('sheet-handle');
+
+// On a narrow screen the panel is a bottom sheet, peeking or open. Elsewhere the CSS ignores this.
+const sheetQuery = matchMedia('(max-width: 720px) and (min-height: 501px), (max-width: 720px) and (orientation: portrait)');
+function setSheet(state) {
+  const changed = panel.dataset.sheet !== state;
+  panel.dataset.sheet = state;
+  sheetHandleEl.setAttribute('aria-expanded', String(state === 'open'));
+  if (changed && overviewShown) overview(false); // refit the shelves to the room the sheet leaves
+}
+const toggleSheet = () => {
+  if (sheetQuery.matches) setSheet(panel.dataset.sheet === 'open' ? 'peek' : 'open');
+};
+sheetQuery.addEventListener('change', () => {
+  if (sheetQuery.matches) setSheet('peek');
+});
+sheetHandleEl.addEventListener('click', toggleSheet);
+panel.querySelector('header').addEventListener('click', toggleSheet);
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -2129,6 +2355,15 @@ function renderList() {
   totalsEl.textContent = `${series.length} series · ${volumes} volumes` +
     (figures.length ? ` · ${figures.length} figure${figures.length === 1 ? '' : 's'}` : '');
   undoEl.disabled = undoStack.length === 0;
+
+  const picked = series.find((s) => s.id === selectedId);
+  peekSeriesEl.hidden = !picked;
+  sheetHintEl.hidden = !!picked;
+  if (picked) {
+    peekSeriesEl.querySelector('.title').textContent = picked.title;
+    peekSeriesEl.querySelector('.count').textContent = String(picked.count);
+    peekSeriesEl.querySelector('[data-act="dec"]').disabled = picked.count <= 1;
+  }
 
   const query = searchEl.value.trim().toLowerCase();
   const shown = series.filter((s) => !query || `${s.title} ${s.author}`.toLowerCase().includes(query));
@@ -2186,7 +2421,15 @@ listEl.addEventListener('click', (event) => {
   if (act === 'inc') changeCount(id, 1);
   else if (act === 'dec') changeCount(id, -1);
   else if (act === 'del') commit(series.filter((s) => s.id !== id));
-  else select(id, { focus: true });
+  else {
+    setSheet('peek'); // first, so the camera fits the series into the shelf left showing
+    select(id, { focus: true });
+  }
+});
+
+peekSeriesEl.addEventListener('click', (event) => {
+  const act = event.target.closest('button')?.dataset.act;
+  if (selectedId && act) changeCount(selectedId, act === 'inc' ? 1 : -1);
 });
 
 searchEl.addEventListener('input', renderList);
@@ -2199,6 +2442,7 @@ const LAYOUT_NOTES = {
     `Two rows deep, the back row raised on risers so it shows${stacks ? ', flat stacks on top of it' : ', no books lying on top of each other'}.`,
   dense: 'Two rows deep with flat stacks on top of both. Holds the most, but the back row is hidden.',
   free: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase, and scroll, press ↑ / ↓ or hold Shift and move the pointer while dragging to push it back or pull it forward. R, T and F turn the book you are dragging or pointing at, and a double-click stands it back up. Right-click a book to pick its whole series. An upright book with nothing to lean on falls over.',
+  freeTouch: 'Drag a book or figure to any spot on any shelf or onto the top of a bookcase. Tap one for buttons that turn it, stand it back up or push it back and pull it forward, and Move whole series to pick its whole series. An upright book with nothing to lean on falls over.',
 };
 const freeTools = document.getElementById('free-tools');
 const removeCaseEl = document.getElementById('remove-case');
@@ -2231,15 +2475,19 @@ function renderLayoutNote() {
     button.querySelector('small').textContent = `${cases} bookcase${cases === 1 ? '' : 's'}`;
   }
   const picked = layoutMode === 'free' && series.find((s) => s.id === groupId);
+  const touch = lastPointer === 'touch';
+  const note = LAYOUT_NOTES[touch && layoutMode === 'free' ? 'freeTouch' : layoutMode];
+  const letGo = touch ? 'Tap Move whole series again or Done to let go.' : 'Right-click it again or press Esc to let go.';
   layoutNoteEl.textContent = picked
-    ? `Whole series picked: ${picked.title}. Drag any of its books to move all ${picked.count} together. Right-click it again or press Esc to let go.`
-    : typeof LAYOUT_NOTES[layoutMode] === 'function'
-      ? LAYOUT_NOTES[layoutMode](efficientStacks)
-      : LAYOUT_NOTES[layoutMode];
+    ? `Whole series picked: ${picked.title}. Drag any of its books to move all ${picked.count} together. ${letGo}`
+    : typeof note === 'function'
+      ? note(efficientStacks)
+      : note;
   freeTools.hidden = layoutMode !== 'free';
   togetherEl.hidden = layoutMode !== 'free';
   stacksEl.hidden = layoutMode !== 'efficient';
   removeCaseEl.disabled = layout.cases < 2 || !emptyCases().length;
+  renderActions();
 }
 
 // Bookcases holding no books and no figures, wherever they are in the row.
@@ -2392,6 +2640,7 @@ figureForm.addEventListener('submit', (event) => {
   const id = newId();
   setFigures([...figures, { id, name: figureNameEl.value.trim().replace(/\s+/g, ' ').slice(0, 80), size, ...spot }]);
   figureNameEl.value = '';
+  setSheet('peek');
   focusFigure(id);
 });
 
@@ -2401,7 +2650,10 @@ figureListEl.addEventListener('click', (event) => {
   if (event.target.closest('button')) {
     figureNotice = '';
     setFigures(figures.filter((f) => f.id !== id));
-  } else focusFigure(id);
+  } else {
+    setSheet('peek');
+    focusFigure(id);
+  }
 });
 
 document.getElementById('add-form').addEventListener('submit', (event) => {
@@ -2546,9 +2798,10 @@ malFileEl.addEventListener('change', () => {
 
 // Arrow up pushes the dragged thing back and arrow down pulls it forward. True when it was one.
 function depthKey(event, d) {
-  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return false;
+  const dz = actionFor(event.key)?.dz;
+  if (!dz) return false;
   event.preventDefault();
-  nudgeDepth(d, event.key === 'ArrowUp' ? -DEPTH_KEY_STEP : DEPTH_KEY_STEP);
+  nudgeDepth(d, dz);
   return true;
 }
 
@@ -2564,7 +2817,7 @@ window.addEventListener('keydown', (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return; // leave browser shortcuts alone
   if (event.target.closest('input, textarea')) return;
   // Quarter turns in free float: R rolls the book, T turns it to face another way, F tips it over.
-  const axis = { f: 0, t: 1, r: 2 }[event.key.toLowerCase()];
+  const { axis } = actionFor(event.key) ?? {};
   if (shelfDrag) {
     if (event.key === 'Escape') endShelfDrag(false); // put the board back where it was
     return;
@@ -2593,15 +2846,13 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (axis !== undefined && layoutMode === 'free' && hovered) {
-    // Turn the book under the pointer where it stands.
-    const { slot } = hovered.userData;
-    const spot = dropSpot(slot.shelf, bodiesIn(free.books, slot.shelf, slot.key), slot.look, slot.x, slot.z, TURNS[slot.o][axis]);
-    if (spot) moveBook(slot, { ...spot, shelf: slot.shelf });
+    turnInPlace(hovered.userData.slot, axis); // the book under the pointer, where it stands
     return;
   }
   if (event.key === 'Escape') {
     inspectedKey = null;
     groupId = null;
+    actionTarget = null;
     select(null);
     renderLayoutNote();
   }
@@ -2770,12 +3021,7 @@ window.__shelf = {
     if (spot) setFigures([...figures, { id: newId(), name, size, ...spot }]);
     return spot;
   },
-  moveFigure: (id, shelf, x, z = Infinity) => {
-    const f = figures.find((item) => item.id === id);
-    const fit = f && figureFits(figures, id, f.size, shelf, x, layoutMode === 'free' ? z : Infinity);
-    if (fit) setFigures(figures.map((item) => (item.id === id ? { ...item, shelf, ...fit } : item)));
-    return fit;
-  },
+  moveFigure,
   setDims: (raw) => changeDims(raw),
   turns: TURNS,
   get limits() { return { SHELF_W, CASE_W, CASE_H, TOP_CLEAR, BOOK_D, CASE_D, BOOK_Z, SHELVES, TWO_DEEP, clears: ROW_CLEAR, floors: ROW_FLOOR }; },

@@ -2,18 +2,32 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Manga Shelf</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <canvas id="scene"></canvas>
 
-    <aside id="panel">
+    <aside id="panel" data-sheet="peek">
+      <button type="button" id="sheet-handle" aria-label="Show or hide the panel" aria-expanded="false"></button>
       <header>
         <h1>Manga Shelf</h1>
         <p id="totals"></p>
       </header>
+
+      <div id="peek">
+        <div id="peek-series" hidden>
+          <span class="title"></span>
+          <button type="button" data-act="dec" aria-label="Remove a volume">−</button>
+          <span class="count"></span>
+          <button type="button" data-act="inc" aria-label="Add a volume">+</button>
+        </div>
+        <p id="sheet-hint">
+          <span class="for-touch">Drag to orbit · pinch to zoom · tap a book to see its cover</span>
+          <span class="for-mouse">Drag to orbit · scroll to zoom · click a book to see its cover</span>
+        </p>
+      </div>
 
       <form id="add-form" autocomplete="off">
         <input id="add-title" placeholder="Title" required />
@@ -100,7 +114,11 @@
     </aside>
 
     <div id="tooltip" hidden></div>
-    <div id="hint">Drag to orbit · right-drag to pan · scroll to zoom · drag a shelf board to move it · click a book to see its cover · <kbd>+</kbd>/<kbd>−</kbd> add or remove a volume</div>
+    <div id="book-actions" role="toolbar" aria-label="Move the book or figure you tapped" hidden></div>
+    <div id="hint">
+      <span class="for-mouse">Drag to orbit · right-drag to pan · scroll to zoom · drag a shelf board to move it · click a book to see its cover · <kbd>+</kbd>/<kbd>−</kbd> add or remove a volume</span>
+      <span class="for-touch">Drag to orbit · pinch to zoom · drag with two fingers to pan · drag a shelf board to move it · tap a book to see its cover</span>
+    </div>
 
     <script type="module" src="/src/main.js"></script>
   </body>
